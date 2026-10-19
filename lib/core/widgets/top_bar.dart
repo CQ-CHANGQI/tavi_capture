@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../app_colors.dart';
-import '../connect_state.dart';
+import '../models/connect_state.dart';
+import '../theme/app_colors.dart';
 
 /// 顶部状态栏，所有页面共用。
 class TopBar extends StatelessWidget {
@@ -12,6 +12,9 @@ class TopBar extends StatelessWidget {
     required this.onDevices,
     required this.onMove,
     required this.onLogin,
+    this.userName,
+    this.onStatusTap,
+    this.showDevices = false,
   });
 
   final ConnectState state;
@@ -19,6 +22,9 @@ class TopBar extends StatelessWidget {
   final VoidCallback? onDevices;
   final VoidCallback? onMove;
   final VoidCallback onLogin;
+  final String? userName;
+  final VoidCallback? onStatusTap;
+  final bool showDevices;
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +38,19 @@ class TopBar extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 820;
+          final showTaskChips = showDevices && constraints.maxWidth >= 1000;
 
           return Row(
             children: [
-              _brand(compact),
+              if (compact)
+                _brand(compact)
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 180),
+                  child: _brand(compact),
+                ),
               const SizedBox(width: 12),
-              Expanded(child: Center(child: _status(compact))),
+              Expanded(child: Center(child: _status(compact, showTaskChips))),
               if (!compact) ...[
                 _barButton('底盘移动', onMove),
                 const SizedBox(width: 8),
@@ -100,10 +113,28 @@ class TopBar extends StatelessWidget {
     );
   }
 
-  Widget _status(bool compact) {
+  Widget _status(bool compact, bool showTaskChips) {
     if (state == ConnectState.connected) {
       if (compact) {
         return _chip('已连接', AppColors.ok);
+      }
+      if (showTaskChips) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _chip('VR在线', AppColors.ok),
+            const SizedBox(width: 6),
+            _chip('主视角', AppColors.ok),
+            const SizedBox(width: 6),
+            _chip('左腕', AppColors.ok),
+            const SizedBox(width: 6),
+            _chip('右腕', AppColors.ok),
+            const SizedBox(width: 6),
+            _chip('底盘就绪', AppColors.ok),
+            const SizedBox(width: 6),
+            _chip('剩余 805GB', AppColors.ok),
+          ],
+        );
       }
       return Row(
         mainAxisSize: MainAxisSize.min,
@@ -119,7 +150,21 @@ class TopBar extends StatelessWidget {
       return _chip('连接中…', AppColors.warn);
     }
 
-    return _chip('未连接机器人', AppColors.bad, danger: true);
+    final chip = _chip(
+      compact ? '未连接机器人' : '未连接机器人 · 点击设置',
+      AppColors.bad,
+      danger: true,
+    );
+
+    if (onStatusTap == null) {
+      return chip;
+    }
+
+    return InkWell(
+      onTap: onStatusTap,
+      borderRadius: BorderRadius.circular(99),
+      child: chip,
+    );
   }
 
   Widget _chip(String text, Color dotColor, {bool danger = false}) {
@@ -175,6 +220,12 @@ class TopBar extends StatelessWidget {
   }
 
   Widget _user() {
+    final name = userName;
+    final label = name ?? '未登录';
+    final avatar = name == null || name.isEmpty
+        ? '?'
+        : name.substring(name.length - 1);
+
     return InkWell(
       onTap: onLogin,
       borderRadius: BorderRadius.circular(22),
@@ -183,9 +234,9 @@ class TopBar extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              '未登录',
-              style: TextStyle(fontSize: 13, color: Color(0xFFD5E2EF)),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Color(0xFFD5E2EF)),
             ),
             const SizedBox(width: 8),
             Container(
@@ -196,10 +247,10 @@ class TopBar extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.line),
               ),
-              child: const Center(
+              child: Center(
                 child: Text(
-                  '?',
-                  style: TextStyle(fontSize: 14, color: AppColors.ink),
+                  avatar,
+                  style: const TextStyle(fontSize: 14, color: AppColors.ink),
                 ),
               ),
             ),

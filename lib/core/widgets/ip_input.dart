@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../app_colors.dart';
+import '../theme/app_colors.dart';
 
 /// 四段式 IP 输入框。
 ///

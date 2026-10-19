@@ -1,5 +1,10 @@
 import 'package:dart_ping/dart_ping.dart';
 
+/// ping 一个 IP：返回 null 表示通，返回字符串表示失败原因。
+///
+/// 抽成函数类型，方便页面注入、测试时替换成假实现。
+typedef PingCheck = Future<String?> Function(String ip);
+
 /// 真正的 ICMP ping。
 ///
 /// macOS / Windows / Linux / Android 调系统 ping 命令；

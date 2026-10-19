@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'app_colors.dart';
-import 'connect_state.dart';
-import 'services/ping_service.dart';
-import 'widgets/ip_input.dart';
-import 'widgets/top_bar.dart';
-
-/// ping 一个 IP：返回 null 表示通，返回字符串表示失败原因。
-///
-/// 抽成函数类型是为了测试时可以传假实现，不用真的联网。
-typedef PingCheck = Future<String?> Function(String ip);
+import '../../app_routes.dart';
+import '../../core/models/connect_state.dart';
+import '../../core/network/ping_service.dart';
+import '../../core/state/app_state.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/widgets/ip_input.dart';
+import '../../core/widgets/top_bar.dart';
 
 /// 首屏：连接机器人。
 /// 点“重新连接”会真的去 ping 输入的 IP。
@@ -23,8 +20,8 @@ class ConnectPage extends StatefulWidget {
 }
 
 class _ConnectPageState extends State<ConnectPage> {
-  // 还没做 IP 持久化，先把原型里的默认地址写死；等做设置页再存本地。
-  String _ip = '192.168.1.21';
+  // 还没做 IP 持久化，先用 appState 里的默认地址；等做设置页再存本地。
+  String _ip = defaultRobotIp;
   ConnectState _state = ConnectState.failed;
   String? _error = '还没有连接机器人。填好 IP 后点「重新连接」，会 ping 这个地址。';
 
@@ -68,23 +65,17 @@ class _ConnectPageState extends State<ConnectPage> {
       return; // 异步回来时页面可能已经关了。
     }
 
-    setState(() {
-      if (error == null) {
-        _state = ConnectState.connected;
-      } else {
-        _state = ConnectState.failed;
-        _error = error;
-      }
-    });
-  }
+    if (error == null) {
+      appState.connection = ConnectState.connected;
+      appState.robotIp = ip;
+      Navigator.pushReplacementNamed(context, Routes.home);
+      return;
+    }
 
-  void _todo(String name) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$name页面还没做'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
+    setState(() {
+      _state = ConnectState.failed;
+      _error = error;
+    });
   }
 
   String get _title {
@@ -99,7 +90,7 @@ class _ConnectPageState extends State<ConnectPage> {
 
   String get _description {
     if (_state == ConnectState.connected) {
-      return 'ping 通了。登录和首页还没做，先停在这一页验证连接。';
+      return 'ping 通了，正在进入登录页。';
     }
     if (_state == ConnectState.connecting) {
       return '正在 ping $_ip，最多等 1 秒。连上之前顶栏不展示设备状态。';
@@ -115,14 +106,16 @@ class _ConnectPageState extends State<ConnectPage> {
           children: [
             TopBar(
               state: _state,
-              onSettings: () => _todo('设置'),
+              userName: appState.userName,
+              onStatusTap: () => Navigator.pushNamed(context, Routes.settings),
+              onSettings: () => Navigator.pushNamed(context, Routes.settings),
               onDevices: _state == ConnectState.connected
-                  ? () => _todo('设备状态')
+                  ? () => Navigator.pushNamed(context, Routes.devices)
                   : null,
               onMove: _state == ConnectState.connected
-                  ? () => _todo('底盘移动')
+                  ? () => Navigator.pushNamed(context, Routes.move)
                   : null,
-              onLogin: () => _todo('登录'),
+              onLogin: () => Navigator.pushNamed(context, Routes.login),
             ),
             Expanded(
               child: LayoutBuilder(
@@ -161,8 +154,8 @@ class _ConnectPageState extends State<ConnectPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(width: 360, child: _headline()),
-        const SizedBox(width: 48),
-        SizedBox(width: 420, child: _connectCard()),
+        const SizedBox(width: 28),
+        SizedBox(width: 340, child: _connectCard()),
       ],
     );
   }
@@ -173,12 +166,12 @@ class _ConnectPageState extends State<ConnectPage> {
       mainAxisSize: MainAxisSize.min,
       children: [
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 360),
           child: _headline(),
         ),
         const SizedBox(height: 24),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 340),
           child: SizedBox(width: double.infinity, child: _connectCard()),
         ),
       ],
@@ -203,7 +196,7 @@ class _ConnectPageState extends State<ConnectPage> {
         Text(
           _description,
           style: const TextStyle(
-            fontSize: 14,
+            fontSize: 16,
             color: AppColors.muted,
             height: 1.6,
           ),
@@ -243,6 +236,7 @@ class _ConnectPageState extends State<ConnectPage> {
             width: double.infinity,
             height: 44,
             child: FilledButton(
+              key: const Key('connectButton'),
               onPressed: connecting ? null : _connect,
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.brand,
@@ -257,7 +251,7 @@ class _ConnectPageState extends State<ConnectPage> {
                     : connected
                     ? '保存并连接'
                     : '重新连接',
-                style: const TextStyle(fontSize: 15),
+                style: const TextStyle(fontSize: 14),
               ),
             ),
           ),
