@@ -1140,8 +1140,14 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  DateTime _lastLiveNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
   void _onLive() {
     if (_disposed) return;
+    // 状态栏只需要知道“在线/离线”，不用每帧重建整页。
+    final now = DateTime.now();
+    if (now.difference(_lastLiveNotify).inMilliseconds < 500) return;
+    _lastLiveNotify = now;
     notifyListeners();
   }
 

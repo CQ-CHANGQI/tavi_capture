@@ -31,6 +31,7 @@ class LcmStats {
   int incomplete = 0;
   int corrupt = 0;
   int pending = 0;
+  int coalesced = 0;
   List<String> interfaces = const [];
 
   void reset() {
@@ -41,6 +42,7 @@ class LcmStats {
     incomplete = 0;
     corrupt = 0;
     pending = 0;
+    coalesced = 0;
     interfaces = const [];
   }
 
@@ -53,6 +55,7 @@ class LcmStats {
     incomplete = read('incomplete');
     corrupt = read('corrupt');
     pending = read('pending');
+    coalesced = read('coalesced');
     final list = data['interfaces'];
     interfaces = list is List
         ? list.whereType<String>().toList(growable: false)
@@ -162,7 +165,11 @@ class LcmReceiver {
     switch (message['type']) {
       case 'ready':
         final commands = message['commands'];
-        if (commands is SendPort) _commands = commands;
+        if (commands is SendPort) {
+          _commands = commands;
+          // 先让子 isolate 知道 UI 已经在听了，再开始推帧。
+          commands.send(const <String, Object?>{'type': 'start'});
+        }
         final ready = _ready;
         if (ready != null && !ready.isCompleted) ready.complete();
 
@@ -244,24 +251,42 @@ Future<void> _receive(Map<String, Object?> args) async {
   };
 
   final latest = <String, CameraFrame>{};
-  var inFlight = false;
+  var inFlight = 0;
+  const maxInFlight = 2;
   var stopped = false;
+  var canSend = false;
+  var flushQueued = false;
+  var coalesced = 0;
 
   void flush() {
-    if (stopped || inFlight || latest.isEmpty) return;
+    if (stopped || !canSend || inFlight >= maxInFlight || latest.isEmpty) {
+      return;
+    }
     final items = <Map<String, Object?>>[
       for (final frame in latest.values)
         <String, Object?>{'camera': frame.camera, 'image': frame.image},
     ];
     latest.clear();
-    inFlight = true;
+    inFlight++;
     responses.send(<String, Object?>{'type': 'frames', 'items': items});
+  }
+
+  /// 同一轮 socket 事件里完成的几路相机合成一条消息，减少 isolate 拷贝次数。
+  void queueFlush() {
+    if (flushQueued || stopped) return;
+    flushQueued = true;
+    scheduleMicrotask(() {
+      flushQueued = false;
+      flush();
+    });
   }
 
   final router = PreviewRouter(
     counters: counters,
     onCameraFrame: (frame) {
+      if (latest.containsKey(frame.camera)) coalesced++;
       latest[frame.camera] = frame;
+      queueFlush();
     },
     onJointBatches: (batches) {
       if (stopped) return;
@@ -311,17 +336,20 @@ Future<void> _receive(Map<String, Object?> args) async {
     'commands': commands.sendPort,
   });
 
-  Timer? frameTimer;
   Timer? statsTimer;
   Timer? housekeeping;
 
   commands.listen((command) {
     if (command is! Map) return;
-    if (command['type'] == 'frameAck') {
-      inFlight = false;
+    if (command['type'] == 'start') {
+      canSend = true;
+      queueFlush();
+    } else if (command['type'] == 'frameAck') {
+      if (inFlight > 0) inFlight--;
+      // ack 一到就发下一批。
+      queueFlush();
     } else if (command['type'] == 'stop') {
       stopped = true;
-      frameTimer?.cancel();
       statsTimer?.cancel();
       housekeeping?.cancel();
       for (final link in links) {
@@ -352,7 +380,6 @@ Future<void> _receive(Map<String, Object?> args) async {
     }
   }
 
-  frameTimer = Timer.periodic(const Duration(milliseconds: 33), (_) => flush());
   statsTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
     if (stopped) return;
     final interfaces = <String>{for (final link in links) ...link.joinedNames};
@@ -366,6 +393,7 @@ Future<void> _receive(Map<String, Object?> args) async {
         'incomplete': counters.incomplete,
         'corrupt': counters.corrupt,
         'pending': router.pendingFrames,
+        'coalesced': coalesced,
         'interfaces': interfaces.toList(growable: false),
       },
     });

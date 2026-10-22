@@ -75,7 +75,7 @@ Future<void> main(List<String> args) async {
     'stats: datagrams=${stats.datagrams} messages=${stats.messages} '
     'parseErrors=${stats.parseErrors} dropped=${stats.dropped} '
     'incomplete=${stats.incomplete} corrupt=${stats.corrupt} '
-    'pending=${stats.pending}',
+    'pending=${stats.pending} coalesced=${stats.coalesced}',
   );
   if (frames.isEmpty) exitCode = 1;
 }

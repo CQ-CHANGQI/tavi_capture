@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/app_state.dart';
+import '../core/live_preview.dart';
 import '../core/models.dart';
 import '../core/scope.dart';
 import '../core/theme.dart';
@@ -174,6 +175,15 @@ class CollectScreen extends StatelessWidget {
 
   Widget _cameras(AppState app) {
     final live = app.live;
+    if (live == null) return _cameraPanel(null);
+    // 逐帧刷新只重建这一块，不让整页跟着 60Hz 重建。
+    return ListenableBuilder(
+      listenable: live,
+      builder: (context, _) => _cameraPanel(live),
+    );
+  }
+
+  Widget _cameraPanel(LivePreview? live) {
     final online = live?.allCamerasOnline ?? false;
     return Panel(
       child: Column(

@@ -38,6 +38,8 @@ class LivePreview extends ChangeNotifier {
   bool running = false;
   String? error;
   bool _disposed = false;
+  bool _dirty = false;
+  Timer? _ticker;
 
   LcmStats get stats => _receiver?.stats ?? LcmStats();
 
@@ -65,6 +67,11 @@ class LivePreview extends ChangeNotifier {
     if (_disposed || running) return;
     running = true;
     error = null;
+    _ticker ??= Timer.periodic(const Duration(milliseconds: 16), (_) {
+      if (_disposed || !_dirty) return;
+      _dirty = false;
+      notifyListeners();
+    });
     final receiver = _receiver ??= LcmReceiver();
     _frameSub = receiver.frames.listen(_onFrame, onError: _onError);
     _jointSub = receiver.joints.listen(_onJoints, onError: _onError);
@@ -96,21 +103,16 @@ class LivePreview extends ChangeNotifier {
   void _onFrame(CameraFrame frame) {
     if (_disposed) return;
     final camera = frame.camera;
-    final now = DateTime.now();
-    lastFrame[camera] = now;
-    (_arrivals[camera] ??= []).add(now);
-    if (_arrivals[camera]!.length > 30) _arrivals[camera]!.removeAt(0);
-
+    lastFrame[camera] = DateTime.now();
     _pendingBytes[camera] = frame.image;
     if (_decoding.add(camera)) unawaited(_decode(camera));
-    notifyListeners();
   }
 
   void _onJoints(List<JointBatch> batches) {
     if (_disposed || batches.isEmpty) return;
     joints = batches;
     jointsAt = DateTime.now();
-    notifyListeners();
+    _dirty = true;
   }
 
   Future<void> _decode(String camera) async {
@@ -126,6 +128,8 @@ class LivePreview extends ChangeNotifier {
         }
         final old = images[camera];
         images[camera] = frame.image;
+        _recordRendered(camera);
+        _dirty = true;
         if (old != null) {
           SchedulerBinding.instance.addPostFrameCallback((_) => old.dispose());
         }
@@ -136,7 +140,14 @@ class LivePreview extends ChangeNotifier {
       }
     }
     _decoding.remove(camera);
-    if (!_disposed) notifyListeners();
+  }
+
+  /// fps 统计按“真正解出来并显示”的帧算，而不是收到的帧。
+  void _recordRendered(String camera) {
+    final now = DateTime.now();
+    final arrivals = _arrivals[camera] ??= [];
+    arrivals.add(now);
+    if (arrivals.length > 61) arrivals.removeAt(0);
   }
 
   void _onError(Object e) {
@@ -158,6 +169,8 @@ class LivePreview extends ChangeNotifier {
     _disposed = true;
     _frameSub?.cancel();
     _jointSub?.cancel();
+    _ticker?.cancel();
+    _ticker = null;
     unawaited(_receiver?.dispose());
     _receiver = null;
     unawaited(AndroidMulticastLock.release());
