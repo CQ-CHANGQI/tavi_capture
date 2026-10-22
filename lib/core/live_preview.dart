@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -9,7 +10,10 @@ import 'lcm/multicast_lock.dart';
 import 'lcm/preview_protocol.dart';
 import 'models.dart';
 
-/// 实时预览：LCM 组播进接收 isolate，UI 侧只解码每路最新一帧。
+/// 实时预览：接收 isolate 负责收包和重组，这里按到达顺序逐帧解码渲染。
+///
+/// 不再“只留最新一帧”：每路一个队列，解码慢就排队（内存换帧），
+/// 不主动丢数据。Flutter 自己会把同一 vsync 内的多次通知合并成一次绘制。
 class LivePreview extends ChangeNotifier {
   LivePreview({Iterable<String>? channels})
     : _channels =
@@ -24,13 +28,15 @@ class LivePreview extends ChangeNotifier {
   StreamSubscription<CameraFrame>? _frameSub;
   StreamSubscription<List<JointBatch>>? _jointSub;
 
-  /// 相机键（cam_head 等）→ 已解码画面。
+  /// 相机键（cam_head 等）→ 当前显示的已解码画面。
   final Map<String, ui.Image> images = {};
 
   /// 相机键 → 最近一次收到帧的时间。
   final Map<String, DateTime> lastFrame = {};
   final Map<String, List<DateTime>> _arrivals = {};
-  final Map<String, Uint8List> _pendingBytes = {};
+
+  /// 相机键 → 待解码队列，保证不丢帧、不乱序。
+  final Map<String, Queue<Uint8List>> _pending = {};
   final Set<String> _decoding = {};
 
   List<JointBatch>? joints;
@@ -38,11 +44,14 @@ class LivePreview extends ChangeNotifier {
   bool running = false;
   String? error;
   bool _disposed = false;
-  bool _dirty = false;
-  Timer? _ticker;
 
   LcmStats get stats => _receiver?.stats ?? LcmStats();
 
+  /// 还没解码完的帧数；长期 > 0 说明渲染速度跟不上收到的帧。
+  int get backlog =>
+      _pending.values.fold(0, (sum, queue) => sum + queue.length);
+
+  /// 已解码并参与显示的帧率。
   double fps(String camera) {
     final list = _arrivals[camera];
     if (list == null || list.length < 2) return 0;
@@ -67,11 +76,6 @@ class LivePreview extends ChangeNotifier {
     if (_disposed || running) return;
     running = true;
     error = null;
-    _ticker ??= Timer.periodic(const Duration(milliseconds: 16), (_) {
-      if (_disposed || !_dirty) return;
-      _dirty = false;
-      notifyListeners();
-    });
     final receiver = _receiver ??= LcmReceiver();
     _frameSub = receiver.frames.listen(_onFrame, onError: _onError);
     _jointSub = receiver.joints.listen(_onJoints, onError: _onError);
@@ -104,7 +108,7 @@ class LivePreview extends ChangeNotifier {
     if (_disposed) return;
     final camera = frame.camera;
     lastFrame[camera] = DateTime.now();
-    _pendingBytes[camera] = frame.image;
+    (_pending[camera] ??= Queue<Uint8List>()).add(frame.image);
     if (_decoding.add(camera)) unawaited(_decode(camera));
   }
 
@@ -112,12 +116,14 @@ class LivePreview extends ChangeNotifier {
     if (_disposed || batches.isEmpty) return;
     joints = batches;
     jointsAt = DateTime.now();
-    _dirty = true;
+    notifyListeners();
   }
 
   Future<void> _decode(String camera) async {
-    while (!_disposed && _pendingBytes.containsKey(camera)) {
-      final bytes = _pendingBytes.remove(camera)!;
+    while (!_disposed) {
+      final queue = _pending[camera];
+      if (queue == null || queue.isEmpty) break;
+      final bytes = queue.removeFirst();
       ui.Codec? codec;
       try {
         codec = await ui.instantiateImageCodec(bytes);
@@ -129,25 +135,26 @@ class LivePreview extends ChangeNotifier {
         final old = images[camera];
         images[camera] = frame.image;
         _recordRendered(camera);
-        _dirty = true;
+        // 每解出一帧就通知；同一 vsync 内的多次通知由 Flutter 合并。
+        notifyListeners();
         if (old != null) {
           SchedulerBinding.instance.addPostFrameCallback((_) => old.dispose());
         }
       } catch (_) {
-        // 坏帧丢弃，保留上一张。
+        // 坏帧丢弃，继续下一帧。
       } finally {
         codec?.dispose();
       }
     }
     _decoding.remove(camera);
+    if (_pending[camera]?.isEmpty ?? false) _pending.remove(camera);
   }
 
-  /// fps 统计按“真正解出来并显示”的帧算，而不是收到的帧。
   void _recordRendered(String camera) {
     final now = DateTime.now();
     final arrivals = _arrivals[camera] ??= [];
     arrivals.add(now);
-    if (arrivals.length > 61) arrivals.removeAt(0);
+    if (arrivals.length > 121) arrivals.removeAt(0);
   }
 
   void _onError(Object e) {
@@ -161,7 +168,7 @@ class LivePreview extends ChangeNotifier {
       image.dispose();
     }
     images.clear();
-    _pendingBytes.clear();
+    _pending.clear();
   }
 
   @override
@@ -169,8 +176,6 @@ class LivePreview extends ChangeNotifier {
     _disposed = true;
     _frameSub?.cancel();
     _jointSub?.cancel();
-    _ticker?.cancel();
-    _ticker = null;
     unawaited(_receiver?.dispose());
     _receiver = null;
     unawaited(AndroidMulticastLock.release());

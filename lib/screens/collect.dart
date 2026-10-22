@@ -194,6 +194,11 @@ class CollectScreen extends StatelessWidget {
               const Spacer(),
               if (live != null && live.error != null)
                 const Text('接收异常', style: TextStyle(fontSize: 12, color: C.bad))
+              else if (live != null && live.backlog > 0)
+                Text(
+                  '积压 ${live.backlog}',
+                  style: const TextStyle(fontSize: 12, color: C.warn),
+                )
               else
                 Text(
                   live == null
