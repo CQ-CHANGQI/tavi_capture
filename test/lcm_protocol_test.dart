@@ -359,6 +359,11 @@ void main() {
     router.handle(LcmMessage('/weird/joint_feed', joint));
     expect(joints, hasLength(1));
     expect(joints.single.state['head_joint1'], 1.5);
+
+    for (final chunk in _previewFrames(image, messageId: 4)) {
+      router.handle(LcmMessage('/gripper/camera_fisheye_l/color', chunk));
+    }
+    expect(frames.last.camera, 'cam_left');
   });
 
   test('读 PNG/JPEG 尺寸', () {

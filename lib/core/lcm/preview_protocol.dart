@@ -221,10 +221,32 @@ class PreviewRouter {
     }
     final chunk = readPreviewChunk(message.payload);
     if (chunk == null) return;
-    final name = channel
-        .split('/')
-        .lastWhere((part) => part.isNotEmpty, orElse: () => '');
-    _camera(name, message.payload);
+    _camera(_cameraNameOf(channel), message.payload);
+  }
+
+  /// 从任意通道名里找出相机槽位，例如
+  /// `/gripper/camera_fisheye_l/color` → `cam_left`。
+  static String _cameraNameOf(String channel) {
+    final parts = channel.split('/');
+    for (final part in parts) {
+      if (part.isEmpty) continue;
+      final slot = _cameraSlot(part);
+      if (slot != part) return slot;
+    }
+    return parts.lastWhere((part) => part.isNotEmpty, orElse: () => '');
+  }
+
+  static String _cameraSlot(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('head') || lower.contains('main')) return 'cam_head';
+    if (lower.contains('left') || lower.contains('fisheye_l')) {
+      return 'cam_left';
+    }
+    if (lower.contains('right') || lower.contains('fisheye_r')) {
+      return 'cam_right';
+    }
+    if (lower.contains('chest') || lower.contains('pan')) return 'cam_chest';
+    return name;
   }
 
   void _camera(String camera, Uint8List payload) {
