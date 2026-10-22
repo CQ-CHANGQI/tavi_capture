@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -10,10 +9,9 @@ import 'lcm/multicast_lock.dart';
 import 'lcm/preview_protocol.dart';
 import 'models.dart';
 
-/// 实时预览：接收 isolate 负责收包和重组，这里按到达顺序逐帧解码渲染。
+/// 实时预览：接收 isolate 负责收包和重组，这里每路只保留最新一帧。
 ///
-/// 不再“只留最新一帧”：每路一个队列，解码慢就排队（内存换帧），
-/// 不主动丢数据。Flutter 自己会把同一 vsync 内的多次通知合并成一次绘制。
+/// 解码来不及就覆盖旧帧，不排队、不累积延迟；保证画面始终是最新数据。
 class LivePreview extends ChangeNotifier {
   LivePreview({Iterable<String>? channels})
     : _channels =
@@ -35,8 +33,8 @@ class LivePreview extends ChangeNotifier {
   final Map<String, DateTime> lastFrame = {};
   final Map<String, List<DateTime>> _arrivals = {};
 
-  /// 相机键 → 待解码队列，保证不丢帧、不乱序。
-  final Map<String, Queue<Uint8List>> _pending = {};
+  /// 相机键 → 最新一帧待解码数据（解码慢时被新帧覆盖）。
+  final Map<String, Uint8List> _latest = {};
   final Set<String> _decoding = {};
 
   List<JointBatch>? joints;
@@ -46,10 +44,6 @@ class LivePreview extends ChangeNotifier {
   bool _disposed = false;
 
   LcmStats get stats => _receiver?.stats ?? LcmStats();
-
-  /// 还没解码完的帧数；长期 > 0 说明渲染速度跟不上收到的帧。
-  int get backlog =>
-      _pending.values.fold(0, (sum, queue) => sum + queue.length);
 
   /// 已解码并参与显示的帧率。
   double fps(String camera) {
@@ -108,7 +102,7 @@ class LivePreview extends ChangeNotifier {
     if (_disposed) return;
     final camera = frame.camera;
     lastFrame[camera] = DateTime.now();
-    (_pending[camera] ??= Queue<Uint8List>()).add(frame.image);
+    _latest[camera] = frame.image;
     if (_decoding.add(camera)) unawaited(_decode(camera));
   }
 
@@ -121,9 +115,8 @@ class LivePreview extends ChangeNotifier {
 
   Future<void> _decode(String camera) async {
     while (!_disposed) {
-      final queue = _pending[camera];
-      if (queue == null || queue.isEmpty) break;
-      final bytes = queue.removeFirst();
+      final bytes = _latest.remove(camera);
+      if (bytes == null) break;
       ui.Codec? codec;
       try {
         codec = await ui.instantiateImageCodec(bytes);
@@ -147,7 +140,6 @@ class LivePreview extends ChangeNotifier {
       }
     }
     _decoding.remove(camera);
-    if (_pending[camera]?.isEmpty ?? false) _pending.remove(camera);
   }
 
   void _recordRendered(String camera) {
@@ -168,7 +160,7 @@ class LivePreview extends ChangeNotifier {
       image.dispose();
     }
     images.clear();
-    _pending.clear();
+    _latest.clear();
   }
 
   @override

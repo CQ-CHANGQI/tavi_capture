@@ -162,7 +162,10 @@ class LcmReceiver {
     switch (message['type']) {
       case 'ready':
         final commands = message['commands'];
-        if (commands is SendPort) _commands = commands;
+        if (commands is SendPort) {
+          _commands = commands;
+          commands.send(const <String, Object?>{'type': 'start'});
+        }
         final ready = _ready;
         if (ready != null && !ready.isCompleted) ready.complete();
 
@@ -241,12 +244,12 @@ Future<void> _receive(Map<String, Object?> args) async {
     jointBatchChannel,
   };
 
-  // 组装好的帧按到达顺序排队；UI 慢就排队，不在接收端丢帧。
+  // 实时优先：组装好一帧就发；UI 侧只保留最新一帧，解码慢就覆盖，
+  // 不在接收端排长队，也不做 ack 往返。
   final outbox = <Map<String, Object?>>[];
   var stopped = false;
   var flushQueued = false;
 
-  /// 同一轮 socket 事件里完成的几帧合成一条消息，帧本身一个都不少。
   void queueFlush() {
     if (flushQueued || stopped) return;
     flushQueued = true;
