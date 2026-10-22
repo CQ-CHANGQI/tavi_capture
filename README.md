@@ -74,7 +74,7 @@ flutter run -d android --dart-define=ROBOT_IP=192.168.13.4
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `ROBOT_IP` | `192.168.1.21` | 首屏默认 IP，也用于拼 MCAP 地址 |
+| `ROBOT_IP` | `192.168.13.4` | 首屏默认 IP，也用于拼 MCAP 地址 |
 | `MCAP_URL` | `http://<ROBOT_IP>:8090/rosbag_0.mcap` | 回放地址 |
 | `DEMO` | `false` | 跳过机器人探测，方便看 UI |
 | `LCM_GROUP` / `LCM_PORT` | `239.255.76.67:7667` | 相机组播 |

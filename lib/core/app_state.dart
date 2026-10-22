@@ -10,7 +10,7 @@ import 'playback.dart';
 
 const defaultRobotIp = String.fromEnvironment(
   'ROBOT_IP',
-  defaultValue: '192.168.1.21',
+  defaultValue: '192.168.13.4',
 );
 
 /// 本地看 UI 用：跳过机器人探测。`--dart-define=DEMO=true`。
@@ -228,12 +228,21 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  List<TaskItem> get hereTasks => localTasks
-      .where((t) => t.ip == savedIp || t.robot == currentRobotName)
-      .toList();
+  /// 台账里有没有当前 IP。没有的话是现场真实机器人（例如 192.168.13.4），
+  /// 业务数据还没接后端，直接展示全部原型任务/采集条，避免页面全空。
+  bool get _robotInLedger => _ledger.any((r) => r.$1 == savedIp);
 
-  bool canCollect(TaskItem? task) =>
-      task != null && (task.ip == savedIp || task.robot == currentRobotName);
+  List<TaskItem> get hereTasks => _robotInLedger
+      ? localTasks
+            .where((t) => t.ip == savedIp || t.robot == currentRobotName)
+            .toList()
+      : localTasks;
+
+  bool canCollect(TaskItem? task) {
+    if (task == null) return false;
+    if (!_robotInLedger) return true;
+    return task.ip == savedIp || task.robot == currentRobotName;
+  }
 
   void pullTasks() {
     if (localSession) {
@@ -870,8 +879,9 @@ class AppState extends ChangeNotifier {
   PlaybackController? _playback;
   PlaybackController? get playback => _playback;
 
-  List<TakeRecord> get libAll =>
-      _takes.where((t) => t.robot == currentRobotName).toList();
+  List<TakeRecord> get libAll => _robotInLedger
+      ? _takes.where((t) => t.robot == currentRobotName).toList()
+      : _takes;
 
   List<TakeRecord> get libRows {
     var rows = libAll;

@@ -69,6 +69,16 @@ void main() {
     state.dispose();
   });
 
+  test('台账外的真实机器人 IP 也能看到全部 mock 数据', () {
+    final state = AppState()
+      ..booted = true
+      ..savedIp = '192.168.13.4';
+    expect(state.hereTasks.length, state.localTasks.length);
+    expect(state.libAll.length, state.takes.length);
+    expect(state.canCollect(state.hereTasks.first), isTrue);
+    state.dispose();
+  });
+
   test('有效/无效可以来回标记', () {
     final state = AppState()..booted = true;
     final take = state.takes.first;
@@ -119,7 +129,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
-    expect(find.text('共 6 条'), findsOneWidget);
+    expect(find.text('共 8 条'), findsOneWidget);
     expect(find.text('回放加载失败'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
     expect(tester.takeException(), isNull);
