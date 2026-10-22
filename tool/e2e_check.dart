@@ -1,8 +1,8 @@
-// End-to-end check: Python publishes mock LCM traffic, Dart decodes it.
+// 端到端检查：Python 发布端 → Dart 接收端（真实 UDP + 真实分片）。
 //
 //   dart run tool/e2e_check.dart
 //
-// No Flutter UI required; this verifies the chunked preview and joint decoder.
+// 不启动 Flutter，覆盖 LCM 分帧、preview_package_t 重组、joint_batch_t 解码。
 //
 // ignore_for_file: avoid_print
 
@@ -11,34 +11,26 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:tavi_capture/core/lcm/chunked_preview.dart';
-import 'package:tavi_capture/core/lcm/codec.dart';
-import 'package:tavi_capture/core/lcm/lcm_udp_client.dart';
+import 'package:tavi_capture/core/lcm/lcm_receiver.dart';
+import 'package:tavi_capture/core/lcm/preview_protocol.dart';
+
+const _cameras = ['cam_head', 'cam_chest', 'cam_left', 'cam_right'];
 
 Future<void> main() async {
   final port = 45000 + Random().nextInt(2000);
-  final client = LcmUdpClient(port: port);
-  final previews = <PreviewImage>[];
-  final joints = <List<JointFrame>>[];
-  final assembler = ChunkedPreviewAssembler(stats: client.stats);
+  final receiver = LcmReceiver(
+    cameraPort: port,
+    jointGroup: lcmCameraGroup,
+    jointPort: port,
+    interfaceName: '',
+  );
 
-  final subscription = client.messages.listen((message) {
-    final package = decodePreviewPackage(message.payload);
-    if (package != null) {
-      final preview = assembler.addPackage(message.channel, package);
-      if (preview != null) previews.add(preview);
-    }
-    final joint = decodeJointBatch(message.payload);
-    if (joint != null) joints.add(joint);
-  });
+  final frames = <CameraFrame>[];
+  final joints = <JointBatch>[];
+  final frameSub = receiver.frames.listen(frames.add);
+  final jointSub = receiver.joints.listen(joints.addAll);
 
-  await client.start(<String>[
-    '/preview/cameras/cam_head',
-    '/preview/cameras/cam_chest',
-    '/preview/cameras/cam_left',
-    '/preview/cameras/cam_right',
-    '/preview/joint_batch',
-  ]);
+  await receiver.start(_cameras.map((c) => '$cameraChannelPrefix$c'));
 
   final process = await Process.start('python3', <String>[
     'tool/mock_publisher.py',
@@ -59,55 +51,42 @@ Future<void> main() async {
   final stdout = await stdoutFuture;
   final stderr = await stderrFuture;
 
-  await Future<void>.delayed(const Duration(milliseconds: 300));
-  await subscription.cancel();
-  await client.dispose();
+  await Future<void>.delayed(const Duration(milliseconds: 400));
+  await frameSub.cancel();
+  await jointSub.cancel();
+  final stats = receiver.stats;
+  await receiver.dispose();
 
   if (code != 0) {
     throw StateError('mock publisher failed ($code)\n$stdout\n$stderr');
   }
 
-  final cameras = previews.map((preview) => preview.camera).toSet();
+  final receivedCameras = frames.map((frame) => frame.camera).toSet();
+  final image = frames.isEmpty ? <int>[] : frames.first.image;
 
+  _check(frames.length == 12, '收到 12 帧（4 相机 × 3 轮），实际 ${frames.length}');
   _check(
-    previews.length == 12,
-    'received 12 preview frames (4 cameras × 3 rounds): ${previews.length}',
+    receivedCameras.length == 4 && receivedCameras.containsAll(_cameras),
+    '四路相机都收到：$receivedCameras',
   );
   _check(
-    cameras.length == 4 &&
-        cameras.containsAll(<String>[
-          'cam_head',
-          'cam_chest',
-          'cam_left',
-          'cam_right',
-        ]),
-    'received 4 camera channels: $cameras',
+    image.length > 2 && image[0] == 0xFF && image[1] == 0xD8,
+    '画面是 JPEG（${image.length} bytes）',
   );
-  _check(joints.length == 3, 'received 3 joint batches (${joints.length})');
+  _check(joints.length == 3, '收到 3 批关节，实际 ${joints.length}');
   _check(
-    previews.first.width == 640 && previews.first.height == 360,
-    'preview dimensions survive the wire format',
+    joints.isNotEmpty && joints.first.state.length == 20,
+    '关节按名字解出 20 个位置值',
   );
   _check(
-    previews.first.bytes.length > 8 &&
-        previews.first.bytes[0] == 0xFF &&
-        previews.first.bytes[1] == 0xD8,
-    'preview payload is a JPEG (mock)',
+    stats.datagrams > 0 && stats.corrupt == 0,
+    '没有坏包（datagrams=${stats.datagrams}, corrupt=${stats.corrupt}）',
   );
-  _check(
-    joints.first.first.stateValues.length == 20,
-    '20 joint state values survive the wire format',
-  );
-  _check(
-    joints.first.first.commandValues.length == 20,
-    '20 joint command values survive the wire format',
-  );
-
-  print('ok  Python publisher -> Dart decoder end-to-end');
-  print(stdout.trim());
+  print('stats: $stats');
+  print('All LCM end-to-end checks passed.');
 }
 
 void _check(bool condition, String message) {
-  if (!condition) throw StateError('FAIL: $message');
+  if (!condition) throw StateError('FAIL $message');
   print('ok  $message');
 }

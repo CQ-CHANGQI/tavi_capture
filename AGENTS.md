@@ -11,8 +11,13 @@
 
 ## 代码地图
 
-- `lib/core/lcm/`：LCM 分帧、`preview_package_t` 分片重组、`joint_batch_t`
-  解码、组播组管理、Android MulticastLock。纯 Dart，不依赖 widget。
+- `lib/core/lcm/`：
+  - `lcm_message.dart`：UDP 数据报 → LCM 消息，长包按发送方+seq 重组；
+  - `preview_protocol.dart`：`preview_package_t` 分片重组、`joint_batch_t`
+    解码、通道路由；
+  - `lcm_receiver.dart`：组播、网卡、接收 isolate、背压；
+  - `multicast_lock.dart`：Android MulticastLock。
+  纯 Dart，不依赖 widget。
 - `lib/core/mcap/`：MCAP over HTTP Range、CDR 解码（Image / CompressedImage /
   JointState / Statistics）。纯 Dart。
 - `lib/core/app_state.dart`：全部页面的状态和动作，页面不自己存业务状态。
@@ -36,6 +41,5 @@
 ```bash
 flutter analyze
 flutter test
-dart run tool/selftest.dart
 dart run tool/e2e_check.dart
 ```

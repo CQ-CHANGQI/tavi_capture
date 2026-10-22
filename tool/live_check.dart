@@ -1,99 +1,81 @@
-// Live check against the real robot: listens on the LCM group and prints
-// decoded frames/joints. Run while the robot publisher is active.
+// 现场检查：监听 LCM 组播，打印相机/关节帧率和接收端计数。
 //
 //   dart run tool/live_check.dart [seconds]
 //
-// Environment overrides (no rebuild needed):
-//
-//   LCM_GROUP=239.255.76.67 LCM_PORT=7667 LCM_IFACE=en6 dart run tool/live_check.dart 10
-//
-// This uses the same assembler as the app (`ChunkedPreviewAssembler`), so a
-// success here means the UI will also receive frames. The final line is the
-// same diagnostic set the app shows: which interfaces are joined, datagrams
-// in, messages decoded, frames assembled, and frames abandoned because a
-// chunk was lost.
+// 环境变量覆盖（不用改代码）：
+//   LCM_GROUP / LCM_PORT / LCM_JOINT_GROUP / LCM_JOINT_PORT / LCM_IFACE
 //
 // ignore_for_file: avoid_print
 
 import 'dart:async';
 import 'dart:io';
 
-import 'package:tavi_capture/core/lcm/chunked_preview.dart';
-import 'package:tavi_capture/core/lcm/codec.dart';
-import 'package:tavi_capture/core/lcm/lcm_udp_client.dart';
+import 'package:tavi_capture/core/lcm/lcm_receiver.dart';
+import 'package:tavi_capture/core/lcm/preview_protocol.dart';
 
 Future<void> main(List<String> args) async {
   final seconds = args.isEmpty ? 5 : int.tryParse(args.first) ?? 5;
-  final group = Platform.environment['LCM_GROUP'] ?? '239.255.76.67';
-  final port = int.tryParse(Platform.environment['LCM_PORT'] ?? '') ?? 7667;
-  final iface = Platform.environment['LCM_IFACE'];
+  final env = Platform.environment;
+  final receiver = LcmReceiver(
+    cameraGroup: env['LCM_GROUP'] ?? lcmCameraGroup,
+    cameraPort: int.tryParse(env['LCM_PORT'] ?? '') ?? lcmCameraPort,
+    jointGroup: env['LCM_JOINT_GROUP'] ?? lcmJointGroup,
+    jointPort: int.tryParse(env['LCM_JOINT_PORT'] ?? '') ?? lcmJointPort,
+    interfaceName: env['LCM_IFACE'] ?? lcmInterface,
+  );
 
-  final client = LcmUdpClient(group: group, port: port, interfaceName: iface);
-  final assembler = ChunkedPreviewAssembler(stats: client.stats);
-  final cameras = <String, int>{};
-  var frames = 0;
-  var joints = 0;
-
-  final subscription = client.messages.listen((message) {
-    final package = decodePreviewPackage(message.payload);
-    if (package != null) {
-      final chunked = assembler.addPackage(message.channel, package);
-      if (chunked != null) {
-        frames++;
-        cameras[chunked.camera] = (cameras[chunked.camera] ?? 0) + 1;
-        if (frames <= 3) {
-          print(
-            'chunked ${message.channel} ${chunked.width}x${chunked.height} '
-            '${chunked.bytes.length}B',
-          );
-        }
-      }
-      return;
-    }
-
-    final joint = decodeJointBatch(message.payload);
-    if (joint != null) {
-      joints++;
-      if (joints <= 3) {
-        print(
-          'joint ${message.channel} frames=${joint.length} '
-          'state=${joint.first.stateValues.length}',
-        );
-      }
-    }
+  final frames = <String, int>{};
+  var jointBatches = 0;
+  final started = DateTime.now();
+  final frameSub = receiver.frames.listen((frame) {
+    frames[frame.camera] = (frames[frame.camera] ?? 0) + 1;
+  });
+  final jointSub = receiver.joints.listen((batch) {
+    jointBatches += batch.length;
   });
 
   try {
-    await client.start(const <String>[], all: true);
+    await receiver.start(const [
+      '${cameraChannelPrefix}cam_head',
+      '${cameraChannelPrefix}cam_chest',
+      '${cameraChannelPrefix}cam_left',
+      '${cameraChannelPrefix}cam_right',
+    ]);
   } catch (error) {
-    print('cannot listen on $group:$port: $error');
-    await subscription.cancel();
-    await client.dispose();
+    print(
+      'cannot listen on ${receiver.cameraGroup}:${receiver.cameraPort}: $error',
+    );
+    await frameSub.cancel();
+    await jointSub.cancel();
+    await receiver.dispose();
     exitCode = 2;
     return;
   }
+
   print(
-    'listening on $group:$port for ${seconds}s '
-    'via ${client.stats.joinedInterfaces.join(', ')}'
-    '${iface == null ? '' : ' (pinned $iface)'}...',
+    'listening on ${receiver.cameraGroup}:${receiver.cameraPort} for '
+    '${seconds}s via ${receiver.stats.interfaces.join(', ')}...',
   );
 
   await Future<void>.delayed(Duration(seconds: seconds));
+  final stats = receiver.stats;
+  final elapsed = DateTime.now().difference(started).inMilliseconds / 1000;
+  await frameSub.cancel();
+  await jointSub.cancel();
+  await receiver.dispose();
 
-  final stats = client.stats;
-  final rates = <String, String>{
-    for (final entry in cameras.entries)
-      entry.key: '${(entry.value / seconds).toStringAsFixed(1)} fps',
-  };
+  for (final camera in frames.keys.toList()..sort()) {
+    final count = frames[camera]!;
+    print(
+      '$camera: $count frames (${(count / elapsed).toStringAsFixed(1)} fps)',
+    );
+  }
+  print('joints: $jointBatches batches');
   print(
-    'frames=$frames joints=$joints cameras=$cameras\n'
-    'rate=$rates\n'
-    'link=${stats.joinedInterfaces} datagrams=${stats.datagrams} '
-    'messages=${stats.messages} incomplete=${stats.incompleteFrames} '
-    'corrupt=${stats.corruptFrames} parseErrors=${stats.parseErrors} '
-    'pending=${assembler.pendingFrames}',
+    'stats: datagrams=${stats.datagrams} messages=${stats.messages} '
+    'parseErrors=${stats.parseErrors} dropped=${stats.dropped} '
+    'incomplete=${stats.incomplete} corrupt=${stats.corrupt} '
+    'pending=${stats.pending}',
   );
-
-  await subscription.cancel();
-  await client.dispose();
+  if (frames.isEmpty) exitCode = 1;
 }

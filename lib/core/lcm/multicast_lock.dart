@@ -1,26 +1,21 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Acquires Android's `WifiManager.MulticastLock` while the preview is live.
-///
-/// Many Android devices silently filter multicast packets when the screen is
-/// off or the app is in the background. The native side lives in
-/// `MainActivity.kt`; this is a no-op on every other platform.
-class MulticastLock {
+/// Android 的 `WifiManager.MulticastLock`：很多设备在息屏或后台会过滤组播，
+/// 采集期间持有它。原生实现见 `MainActivity.kt`，其他平台是空操作。
+class AndroidMulticastLock {
   static const MethodChannel _channel = MethodChannel('tavi/multicast');
   static bool _held = false;
 
   static Future<void> acquire() async {
-    if (defaultTargetPlatform != TargetPlatform.android || _held) {
-      return;
-    }
+    if (_held || defaultTargetPlatform != TargetPlatform.android) return;
     try {
       await _channel.invokeMethod<void>('acquire');
       _held = true;
     } on MissingPluginException {
-      // Running without the Android host (e.g. desktop): nothing to do.
+      // 桌面 / 测试环境没有原生实现。
     } catch (error) {
-      debugPrint('MulticastLock.acquire failed: $error');
+      debugPrint('MulticastLock.acquire 失败：$error');
     }
   }
 
@@ -31,9 +26,9 @@ class MulticastLock {
     try {
       await _channel.invokeMethod<void>('release');
     } on MissingPluginException {
-      // Ignore.
+      // 忽略。
     } catch (error) {
-      debugPrint('MulticastLock.release failed: $error');
+      debugPrint('MulticastLock.release 失败：$error');
     }
   }
 }

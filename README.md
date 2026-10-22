@@ -41,7 +41,11 @@
 ```
 lib/
   core/
-    lcm/         LCM 分帧、preview_package_t 重组、joint_batch_t 解码、组播
+    lcm/
+      lcm_message.dart      UDP 数据报 → LCM 消息（长包按发送方+seq 重组）
+      preview_protocol.dart preview_package_t 重组、joint_batch_t 解码、通道路由
+      lcm_receiver.dart     组播/网卡/接收 isolate/背压，向上暴露帧和关节流
+      multicast_lock.dart   Android MulticastLock
     mcap/        MCAP Range 读取、CDR 解码（Image / JointState / Statistics）
     app_state.dart   全部页面状态与动作（对应原型的全局变量）
     live_preview.dart  实时预览控制器：帧解码 + fps + 在线状态
@@ -49,7 +53,7 @@ lib/
     models.dart、theme.dart、scope.dart
   screens/      setup / home / tasks / done / collect / library / review / modals
   ui/           shell（顶栏 + 弹层 + toast）、相机网格、关节图、播放条、回放面板
-tool/           mock_publisher.py、selftest、e2e_check、live_check、mcap_check
+tool/           mock_publisher.py、e2e_check、live_check、mcap_check
 server/         单文件 MCAP Range 服务器（联调用）
 ```
 
@@ -99,8 +103,8 @@ flutter run -d macos --dart-define=DEMO=true \
 ```bash
 flutter analyze
 flutter test
-dart run tool/selftest.dart     # LCM 分帧/重组/关节解码
-dart run tool/e2e_check.dart    # Python 发布端 → Dart 解码，端到端
+dart run tool/e2e_check.dart    # Python 发布端 → Dart 接收端，端到端
+dart run tool/live_check.dart 5 # 现场组播探针
 dart run tool/mcap_check.dart http://<host>:8090/<file>.mcap  # MCAP 话题/解码
 ```
 
