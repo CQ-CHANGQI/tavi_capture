@@ -14,4 +14,5 @@ class Routes {
   static const brief = '/brief';
   static const swap = '/swap';
   static const recovery = '/recovery';
+  static const joint = '/joint';
 }

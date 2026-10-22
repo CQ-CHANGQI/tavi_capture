@@ -20,6 +20,7 @@ class AppState {
   String robotIp = defaultRobotIp;
   String? userName;
   String role = '采集员';
+  bool localSession = false;
   Task? currentTask;
 
   bool get isEngineer => role == '工程师';
@@ -173,6 +174,7 @@ class AppState {
     robotIp = defaultRobotIp;
     userName = null;
     role = '采集员';
+    localSession = false;
     currentTask = null;
   }
 }

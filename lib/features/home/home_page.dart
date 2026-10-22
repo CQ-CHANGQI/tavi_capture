@@ -47,18 +47,24 @@ class _HomePageState extends State<HomePage> {
                     title: '数据采集',
                     description: '进入我的任务。本机任务都可以采集。',
                     button: '进入采集',
-                    onTap: () => Navigator.pushNamed(context, Routes.tasks),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      appState.tasks.isEmpty ? Routes.tasks : Routes.capture,
+                      arguments: appState.tasks.firstOrNull,
+                    ),
                   ),
                 ),
                 SizedBox(
                   width: 420,
                   child: _ModeCard(
                     title: '查看数据',
-                    description: appState.isEngineer
+                    description: (appState.isEngineer || appState.localSession)
                         ? '工程师可查看并删除当前这台机器人工控上所有人的采集条，不采集。'
                         : '采集员只能进数据采集。',
-                    button: appState.isEngineer ? '进入查看' : '采集员不可用',
-                    onTap: appState.isEngineer
+                    button: (appState.isEngineer || appState.localSession)
+                        ? '进入查看'
+                        : '采集员不可用',
+                    onTap: (appState.isEngineer || appState.localSession)
                         ? () => Navigator.pushNamed(context, Routes.library)
                         : null,
                   ),

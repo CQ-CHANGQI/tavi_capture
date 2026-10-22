@@ -11,11 +11,13 @@ import 'features/capture/capture_page.dart';
 import 'features/connect/connect_page.dart';
 import 'features/home/home_page.dart';
 import 'features/robot/devices_page.dart';
+import 'features/robot/joint_page.dart';
 import 'features/robot/move_page.dart';
 import 'features/robot/recovery_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/takes/review_page.dart';
 import 'features/takes/takes_page.dart';
+import 'features/takes/library_page.dart';
 import 'features/tasks/brief_page.dart';
 import 'features/tasks/swap_page.dart';
 import 'features/tasks/tasks_page.dart';
@@ -49,7 +51,7 @@ Route<dynamic>? generateRoute(
     case Routes.takes:
       return _route(settings, const TakesPage(allPeople: false));
     case Routes.library:
-      return _route(settings, const TakesPage(allPeople: true));
+      return _route(settings, const LibraryPage());
     case Routes.review:
       final take = settings.arguments is Take
           ? settings.arguments as Take
@@ -69,13 +71,18 @@ Route<dynamic>? generateRoute(
     case Routes.swap:
       return _modalRoute(settings, const SwapPage());
     case Routes.settings:
-      return _modalRoute(settings, const SettingsPage());
+      return _modalRoute(
+        settings,
+        SettingsPage(readOnly: settings.arguments == true),
+      );
     case Routes.devices:
       return _modalRoute(settings, const DevicesPage());
     case Routes.move:
       return _modalRoute(settings, const MovePage());
     case Routes.recovery:
       return _modalRoute(settings, const RecoveryPage());
+    case Routes.joint:
+      return _modalRoute(settings, const JointPage());
   }
 
   return _route(

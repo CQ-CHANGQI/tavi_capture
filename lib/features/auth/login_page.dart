@@ -17,7 +17,7 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final _user = TextEditingController(text: '张三');
   final _pass = TextEditingController(text: '1234');
-  final _localPass = TextEditingController(text: '1234');
+  final _localPass = TextEditingController();
   String _localRole = '采集员';
   bool _local = false;
   String? _error;
@@ -33,8 +33,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _next(String role) {
-    final next = role == '工程师' ? Routes.home : Routes.tasks;
-    Navigator.pushNamedAndRemoveUntil(context, next, (route) => false);
+    final next = role == '工程师' ? Routes.home : Routes.capture;
+    Navigator.pushNamedAndRemoveUntil(context, Routes.home, (route) => false);
+    if (next == Routes.capture) Navigator.pushNamed(context, next);
   }
 
   void _cloudLogin() {
@@ -47,12 +48,13 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     appState.userName = name;
+    appState.localSession = false;
     appState.role = role;
     _next(role);
   }
 
   void _localLogin() {
-    if (_localPass.text != '1234') {
+    if (_localPass.text != (_localRole == '工程师' ? 'weiyi1234' : 'weiyi2018')) {
       setState(() => _error = '密码不对');
       return;
     }
@@ -60,6 +62,7 @@ class _LoginPageState extends State<LoginPage> {
     final name = _localRole == '工程师' ? '张三' : '李四';
     appState.userName = name;
     appState.role = _localRole;
+    appState.localSession = true;
     _next(_localRole);
   }
 

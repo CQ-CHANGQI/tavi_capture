@@ -52,39 +52,17 @@ void main() {
 
     await tester.tap(find.text('进入采集'));
     await tester.pumpAndSettle();
-    expect(find.text('数据采集 · 我的任务'), findsOneWidget);
-
-    await tester.tap(find.text('更换任务'));
-    await tester.pumpAndSettle();
-    expect(find.text('接到本机'), findsWidgets);
-    await tester.tap(find.text('关闭'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('进入任务').first);
-    await tester.pumpAndSettle();
     expect(find.text('开始采集'), findsOneWidget);
-
-    await tester.ensureVisible(find.text('采集说明'));
-    await tester.pumpAndSettle();
+    expect(find.text('采集数据'), findsOneWidget);
+    expect(find.textContaining('全景'), findsOneWidget);
     await tester.tap(find.text('采集说明'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('采集说明'), findsWidgets);
+    expect(find.textContaining('compact_shoes · 采集说明'), findsOneWidget);
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
-
-    await tester.ensureVisible(find.text('查看已采集'));
+    await tester.tap(find.text('返回选择模式'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('查看已采集'));
-    await tester.pumpAndSettle();
-    expect(find.text('继续采集一条'), findsOneWidget);
-
-    await tester.tap(find.text('回看').first);
-    await tester.pumpAndSettle();
-    expect(find.text('左臂关节角'), findsOneWidget);
-
-    await tester.tap(find.text('返回列表'));
-    await tester.pumpAndSettle();
-    expect(find.text('继续采集一条'), findsOneWidget);
+    expect(find.text('进入采集'), findsOneWidget);
   });
 
   testWidgets('顶栏的页面都能打开', (WidgetTester tester) async {
@@ -98,36 +76,25 @@ void main() {
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.text('基本设置'), findsOneWidget);
-    await tester.tap(find.text('关闭'));
-    await tester.pumpAndSettle();
-
     await tester.tap(find.text('设备状态'));
     await tester.pumpAndSettle();
-    expect(find.text('VR'), findsOneWidget);
-
-    await tester.tap(find.text('模拟掉线（原型入口）'));
-    await tester.pumpAndSettle();
-    expect(find.text('采集中设备断开'), findsOneWidget);
-    await tester.tap(find.text('回到任务'));
-    await tester.pumpAndSettle();
-    expect(find.text('VR'), findsOneWidget);
-
+    expect(find.textContaining('主视角相机'), findsOneWidget);
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
-
-    await tester.tap(find.text('底盘移动'));
+    await tester.tap(find.text('手动控制'));
     await tester.pumpAndSettle();
-    expect(find.text('底盘停止'), findsOneWidget);
+    expect(find.text('一键连接'), findsOneWidget);
+    expect(find.text('回 home 点'), findsOneWidget);
   });
 
-  testWidgets('采集员登录后直接进任务', (WidgetTester tester) async {
+  testWidgets('采集员登录后直接进采集', (WidgetTester tester) async {
     await _openLogin(tester);
 
     await tester.enterText(find.byKey(const Key('loginUser')), '李四');
     await tester.tap(find.byKey(const Key('loginButton')));
     await tester.pumpAndSettle();
 
-    expect(find.text('数据采集 · 我的任务'), findsOneWidget);
+    expect(find.text('开始采集'), findsOneWidget);
     expect(find.text('切换模式'), findsNothing);
     expect(appState.role, '采集员');
   });
@@ -138,14 +105,27 @@ void main() {
     await tester.tap(find.text('进入查看'));
     await tester.pumpAndSettle();
 
-    expect(find.text('查看数据 · 本机数据'), findsOneWidget);
-    expect(find.textContaining('含所有人员'), findsOneWidget);
+    expect(find.text('查看数据'), findsOneWidget);
+    expect(find.text('全部人员'), findsOneWidget);
+    expect(find.text('上一条'), findsOneWidget);
+    expect(find.text('下一条'), findsOneWidget);
+  });
 
-    await tester.ensureVisible(find.text('回看').first);
+  testWidgets('手机宽度能使用采集页和设置菜单', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await _loginAsEngineer(tester);
+    await tester.tap(find.text('进入采集'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('回看').first);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('菜单'));
     await tester.pumpAndSettle();
-    expect(find.text('左臂关节角'), findsOneWidget);
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('基本设置'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('ping 不通时显示失败原因', (WidgetTester tester) async {

@@ -51,6 +51,13 @@ class _DevicesPageState extends State<DevicesPage> {
             AppButton('重启服务', onPressed: _restart),
             const SizedBox(height: 6),
             TextButton(
+              onPressed: () => Navigator.pushNamed(context, Routes.joint),
+              child: const Text(
+                '机械臂实时角度（rosbridge）',
+                style: TextStyle(fontSize: 12, color: AppColors.brand),
+              ),
+            ),
+            TextButton(
               onPressed: () => Navigator.pushNamed(context, Routes.recovery),
               child: const Text(
                 '模拟掉线（原型入口）',

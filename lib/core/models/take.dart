@@ -1,3 +1,5 @@
+import '../mcap/remote_mcap.dart' show recordingUrl;
+
 /// 一条采集记录。
 class Take {
   Take({
@@ -9,9 +11,11 @@ class Take {
     required this.person,
     required this.robot,
     required this.valid,
+    this.sourceUrl = recordingUrl,
   });
 
   final int id;
+  final String sourceUrl;
   final String taskName;
   final String time;
   final int durationSeconds;
