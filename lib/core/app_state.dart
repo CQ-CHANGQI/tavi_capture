@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import 'ip_store.dart';
 import 'live_preview.dart';
 import 'models.dart';
 import 'playback.dart';
@@ -19,7 +18,7 @@ const demoMode = bool.fromEnvironment('DEMO');
 
 /// 原型里全部页面的状态与动作，UI 只负责画。
 class AppState extends ChangeNotifier {
-  AppState({IpStore? ipStore}) : _ipStore = ipStore ?? IpStore() {
+  AppState() {
     _takes = _seedTakes();
     _catalog = _seedCatalog();
     localTasks = _catalog[currentUser]!.map(_copyTask).toList();
@@ -80,7 +79,6 @@ class AppState extends ChangeNotifier {
   Timer? _toastTimer;
 
   // ------------------------------------------------------------ 连接/会话
-  final IpStore _ipStore;
   String savedIp = defaultRobotIp;
   bool connecting = false;
   bool robotOk = false;
@@ -104,8 +102,6 @@ class AppState extends ChangeNotifier {
   Future<void> boot() async {
     if (booted) return;
     booted = true;
-    final stored = await _ipStore.load();
-    if (stored != null && isValidIp(stored)) savedIp = stored;
     await connect(savedIp, auto: true);
   }
 
@@ -143,7 +139,6 @@ class AppState extends ChangeNotifier {
     savedIp = ip;
     robotOk = true;
     connectError = '';
-    unawaited(_ipStore.save(ip));
     _startLive();
     screen = ScreenId.home;
     notifyListeners();
@@ -233,21 +228,10 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 台账里有没有当前 IP。没有的话是现场真实机器人（例如 192.168.13.4），
-  /// 业务数据还没接后端，直接展示全部原型任务/采集条，避免页面全空。
-  bool get _robotInLedger => _ledger.any((r) => r.$1 == savedIp);
+  /// 业务数据是原型 mock，不按机器人 IP 过滤：连哪台都展示全部任务。
+  List<TaskItem> get hereTasks => localTasks;
 
-  List<TaskItem> get hereTasks => _robotInLedger
-      ? localTasks
-            .where((t) => t.ip == savedIp || t.robot == currentRobotName)
-            .toList()
-      : localTasks;
-
-  bool canCollect(TaskItem? task) {
-    if (task == null) return false;
-    if (!_robotInLedger) return true;
-    return task.ip == savedIp || task.robot == currentRobotName;
-  }
+  bool canCollect(TaskItem? task) => task != null;
 
   void pullTasks() {
     if (localSession) {
@@ -884,9 +868,8 @@ class AppState extends ChangeNotifier {
   PlaybackController? _playback;
   PlaybackController? get playback => _playback;
 
-  List<TakeRecord> get libAll => _robotInLedger
-      ? _takes.where((t) => t.robot == currentRobotName).toList()
-      : _takes;
+  /// 查看数据同样不按机器人过滤。
+  List<TakeRecord> get libAll => _takes;
 
   List<TakeRecord> get libRows {
     var rows = libAll;

@@ -69,14 +69,16 @@ void main() {
     state.dispose();
   });
 
-  test('台账外的真实机器人 IP 也能看到全部 mock 数据', () {
-    final state = AppState()
-      ..booted = true
-      ..savedIp = '192.168.13.4';
-    expect(state.hereTasks.length, state.localTasks.length);
-    expect(state.libAll.length, state.takes.length);
-    expect(state.canCollect(state.hereTasks.first), isTrue);
-    state.dispose();
+  test('mock 任务和采集条不按机器人 IP 过滤', () {
+    for (final ip in ['192.168.13.4', '192.168.1.22']) {
+      final state = AppState()
+        ..booted = true
+        ..savedIp = ip;
+      expect(state.hereTasks.length, state.localTasks.length);
+      expect(state.libAll.length, state.takes.length);
+      expect(state.canCollect(state.hereTasks.first), isTrue);
+      state.dispose();
+    }
   });
 
   test('有效/无效可以来回标记', () {
