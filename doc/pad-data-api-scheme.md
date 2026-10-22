@@ -134,6 +134,7 @@ pad 只在拉任务目录时用它直连云端；拉不到就用 `GET /tasks` �
 | GET | `/api/v1/mode` | 当前模式 |
 | POST | `/api/v1/mode` | `{mode: collect|review|idle}` |
 | GET | `/api/v1/tasks` | 机器人缓存的任务列表 |
+| GET | `/api/v1/tasks/{id}` | 单个任务详情（brief、persons、进度） |
 | POST | `/api/v1/tasks/refresh` | 机器人去云端同步一次 |
 | POST | `/api/v1/tasks/{id}/ensure` | 确保机器人有该任务配置，没有再下载 |
 | POST | `/api/v1/tasks/config` | 云端→机器人下发配置，pad 不调 |
@@ -368,7 +369,7 @@ pad 用这个 URL 走 Range，不整包下载。
 
 | 元素 | 来源 |
 |---|---|
-| 任务/人员筛选 | `GET /tasks`、`task.persons` 或 `GET /persons` |
+| 任务/人员筛选 | `GET /tasks`、`task.persons` |
 | 有效/无效 tab | `GET /takes?valid=` |
 | 列表字段 | take 模型 |
 | 分页 | `GET /takes?page&pageSize` |
