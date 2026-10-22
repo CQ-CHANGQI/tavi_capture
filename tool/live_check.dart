@@ -3,7 +3,7 @@
 //   dart run tool/live_check.dart [seconds]
 //
 // 环境变量覆盖（不用改代码）：
-//   LCM_GROUP / LCM_PORT / LCM_JOINT_GROUP / LCM_JOINT_PORT / LCM_IFACE
+//   LCM_GROUP / LCM_PORT / LCM_JOINT_GROUP / LCM_JOINT_PORT / LCM_IFACE / LCM_ALL
 //
 // ignore_for_file: avoid_print
 
@@ -22,6 +22,7 @@ Future<void> main(List<String> args) async {
     jointGroup: env['LCM_JOINT_GROUP'] ?? lcmJointGroup,
     jointPort: int.tryParse(env['LCM_JOINT_PORT'] ?? '') ?? lcmJointPort,
     interfaceName: env['LCM_IFACE'] ?? lcmInterface,
+    allChannels: (env['LCM_ALL'] ?? '').toLowerCase() == 'true',
   );
 
   final frames = <String, int>{};

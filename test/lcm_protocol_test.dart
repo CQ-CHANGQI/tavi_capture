@@ -333,6 +333,50 @@ void main() {
     expect(joints.first.state['body_joint1'], 0.25);
   });
 
+  test('LCM_ALL：未知通道也能按分片出画面，关节按名字路由', () {
+    final frames = <CameraFrame>[];
+    final joints = <JointBatch>[];
+    final router = PreviewRouter(
+      onCameraFrame: frames.add,
+      onJointBatches: joints.addAll,
+      allChannels: true,
+    );
+
+    final image = [0xFF, 0xD8, 0x09, 0x08];
+    for (final chunk in _previewFrames(image, messageId: 3)) {
+      router.handle(LcmMessage('/weird/cam_top', chunk));
+    }
+    expect(frames, hasLength(1));
+    expect(frames.single.camera, 'cam_top');
+
+    final joint = _jointBatch(
+      timestamp: 9,
+      stateNames: ['head_joint1/position'],
+      stateValues: [1.5],
+      commandNames: const [],
+      commandValues: const [],
+    );
+    router.handle(LcmMessage('/weird/joint_feed', joint));
+    expect(joints, hasLength(1));
+    expect(joints.single.state['head_joint1'], 1.5);
+  });
+
+  test('读 PNG/JPEG 尺寸', () {
+    final png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ'
+      'DwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    );
+    expect(imageSizeOf(png), (1, 1));
+
+    final jpeg = Uint8List.fromList(<int>[
+      0xFF, 0xD8, // SOI
+      0xFF, 0xC0, 0x00, 0x11, 0x08, // SOF0, len 17, precision 8
+      0x00, 0x02, 0x00, 0x03, // height 2, width 3
+      0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+    ]);
+    expect(imageSizeOf(jpeg), (3, 2));
+  });
+
   test('路由：不是 JPEG/PNG 的完整帧计为 corrupt，不交给 UI', () {
     final frames = <CameraFrame>[];
     final router = PreviewRouter(

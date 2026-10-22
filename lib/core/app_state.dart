@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'ip_store.dart';
 import 'live_preview.dart';
 import 'models.dart';
 import 'playback.dart';
@@ -18,7 +19,7 @@ const demoMode = bool.fromEnvironment('DEMO');
 
 /// 原型里全部页面的状态与动作，UI 只负责画。
 class AppState extends ChangeNotifier {
-  AppState() {
+  AppState({IpStore? ipStore}) : _ipStore = ipStore ?? IpStore() {
     _takes = _seedTakes();
     _catalog = _seedCatalog();
     localTasks = _catalog[currentUser]!.map(_copyTask).toList();
@@ -79,6 +80,7 @@ class AppState extends ChangeNotifier {
   Timer? _toastTimer;
 
   // ------------------------------------------------------------ 连接/会话
+  final IpStore _ipStore;
   String savedIp = defaultRobotIp;
   bool connecting = false;
   bool robotOk = false;
@@ -102,6 +104,8 @@ class AppState extends ChangeNotifier {
   Future<void> boot() async {
     if (booted) return;
     booted = true;
+    final stored = await _ipStore.load();
+    if (stored != null && isValidIp(stored)) savedIp = stored;
     await connect(savedIp, auto: true);
   }
 
@@ -139,6 +143,7 @@ class AppState extends ChangeNotifier {
     savedIp = ip;
     robotOk = true;
     connectError = '';
+    unawaited(_ipStore.save(ip));
     _startLive();
     screen = ScreenId.home;
     notifyListeners();

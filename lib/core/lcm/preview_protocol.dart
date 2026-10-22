@@ -185,6 +185,7 @@ class PreviewRouter {
   PreviewRouter({
     required this.onCameraFrame,
     required this.onJointBatches,
+    this.allChannels = false,
     LcmCounters? counters,
   }) : counters = counters ?? LcmCounters() {
     assembler = PreviewAssembler(counters: this.counters);
@@ -192,6 +193,9 @@ class PreviewRouter {
 
   final void Function(CameraFrame frame) onCameraFrame;
   final void Function(List<JointBatch> batches) onJointBatches;
+
+  /// `LCM_ALL=true` 时接收全部通道，未知通道也尝试按相机/关节解。
+  final bool allChannels;
   final LcmCounters counters;
   late final PreviewAssembler assembler;
 
@@ -200,19 +204,35 @@ class PreviewRouter {
   void handle(LcmMessage message) {
     final channel = message.channel;
     if (channel.startsWith(cameraChannelPrefix)) {
-      _camera(channel, message.payload);
-    } else if (channel == jointBatchChannel) {
-      _joint(message.payload);
+      _camera(channel.substring(cameraChannelPrefix.length), message.payload);
+      return;
     }
+    if (channel == jointBatchChannel) {
+      _joint(message.payload);
+      return;
+    }
+    if (!allChannels) return;
+
+    // 未知通道：名字里带 joint 的按关节处理；否则先试 preview 分片，
+    // 通道最后一段当相机名（参考实现的 LCM_ALL 行为）。
+    if (channel.toLowerCase().contains('joint')) {
+      _joint(message.payload);
+      return;
+    }
+    final chunk = readPreviewChunk(message.payload);
+    if (chunk == null) return;
+    final name = channel
+        .split('/')
+        .lastWhere((part) => part.isNotEmpty, orElse: () => '');
+    _camera(name, message.payload);
   }
 
-  void _camera(String channel, Uint8List payload) {
+  void _camera(String camera, Uint8List payload) {
     final chunk = readPreviewChunk(payload);
     if (chunk == null) {
       counters.corrupt++;
       return;
     }
-    final camera = channel.substring(cameraChannelPrefix.length);
     if (camera.isEmpty) {
       counters.corrupt++;
       return;
@@ -324,4 +344,52 @@ Map<String, double> _readRow(
     values[name.substring(0, name.length - 9)] = value;
   }
   return values;
+}
+
+/// 从 JPEG/PNG 头部读尺寸；读不出来返回 null。
+///
+/// UI 解码前用它决定是否需要按显示尺寸降采样（4K/1080p 源解到 1280 宽就够了）。
+(int, int)? imageSizeOf(Uint8List bytes) {
+  if (bytes.length >= 24 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47 &&
+      bytes[12] == 0x49 && // IHDR
+      bytes[13] == 0x48 &&
+      bytes[14] == 0x44 &&
+      bytes[15] == 0x52) {
+    final data = ByteData.sublistView(bytes);
+    return (data.getUint32(16), data.getUint32(20));
+  }
+
+  var offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] != 0xFF) {
+      offset++;
+      continue;
+    }
+    final marker = bytes[offset + 1];
+    offset += 2;
+    if (marker == 0xD8 ||
+        marker == 0xD9 ||
+        (marker >= 0xD0 && marker <= 0xD7)) {
+      continue;
+    }
+    final length = (bytes[offset] << 8) | bytes[offset + 1];
+    if (length < 2 || offset + length > bytes.length) return null;
+    final isStartOfFrame =
+        (marker >= 0xC0 && marker <= 0xC3) ||
+        (marker >= 0xC5 && marker <= 0xC7) ||
+        (marker >= 0xC9 && marker <= 0xCB) ||
+        (marker >= 0xCD && marker <= 0xCF);
+    if (isStartOfFrame) {
+      if (offset + 7 >= bytes.length) return null;
+      final height = (bytes[offset + 3] << 8) | bytes[offset + 4];
+      final width = (bytes[offset + 5] << 8) | bytes[offset + 6];
+      return (width, height);
+    }
+    offset += length;
+  }
+  return null;
 }

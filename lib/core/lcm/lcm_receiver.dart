@@ -22,6 +22,9 @@ const int lcmJointPort = int.fromEnvironment(
 );
 const String lcmInterface = String.fromEnvironment('LCM_IFACE');
 
+/// 不按通道名过滤，收组播里的所有通道（排查通道名/换机器人时用）。
+const bool lcmAllChannels = bool.fromEnvironment('LCM_ALL');
+
 /// 接收端给 UI 看的计数快照。
 class LcmStats {
   int datagrams = 0;
@@ -69,6 +72,7 @@ class LcmReceiver {
     this.jointGroup = lcmJointGroup,
     this.jointPort = lcmJointPort,
     this.interfaceName = lcmInterface,
+    this.allChannels = lcmAllChannels,
   });
 
   final String cameraGroup;
@@ -76,6 +80,7 @@ class LcmReceiver {
   final String jointGroup;
   final int jointPort;
   final String interfaceName;
+  final bool allChannels;
 
   final StreamController<CameraFrame> _frames =
       StreamController<CameraFrame>.broadcast();
@@ -115,6 +120,7 @@ class LcmReceiver {
           'jointGroup': jointGroup,
           'jointPort': jointPort,
           'interfaceName': interfaceName,
+          'all': allChannels,
         },
         onError: errors.sendPort,
         errorsAreFatal: true,
@@ -239,9 +245,10 @@ Future<void> _receive(Map<String, Object?> args) async {
   final commands = ReceivePort();
   final counters = LcmCounters();
   final reader = LcmMessageReader(counters: counters);
+  final allChannels = args['all']! as bool;
   final channels = <String>{
     ...(args['channels']! as List).cast<String>(),
-    jointBatchChannel,
+    if (!allChannels) jointBatchChannel,
   };
 
   // 实时优先：组装好一帧就发；UI 侧只保留最新一帧，解码慢就覆盖，
@@ -264,6 +271,7 @@ Future<void> _receive(Map<String, Object?> args) async {
 
   final router = PreviewRouter(
     counters: counters,
+    allChannels: allChannels,
     onCameraFrame: (frame) {
       outbox.add(<String, Object?>{
         'camera': frame.camera,
@@ -299,6 +307,7 @@ Future<void> _receive(Map<String, Object?> args) async {
     port: args['cameraPort']! as int,
     interfaceName: args['interfaceName']! as String,
     channels: channels,
+    allChannels: allChannels,
     reader: reader,
     router: router,
     counters: counters,
@@ -343,6 +352,7 @@ Future<void> _receive(Map<String, Object?> args) async {
       port: jointPort,
       interfaceName: args['interfaceName']! as String,
       channels: const {jointBatchChannel},
+      allChannels: allChannels,
       reader: reader,
       router: router,
       counters: counters,
@@ -387,6 +397,7 @@ class _UdpLink {
     required this.port,
     required this.interfaceName,
     required this.channels,
+    required this.allChannels,
     required this.reader,
     required this.router,
     required this.counters,
@@ -397,6 +408,7 @@ class _UdpLink {
   final int port;
   final String interfaceName;
   final Set<String> channels;
+  final bool allChannels;
   final LcmMessageReader reader;
   final PreviewRouter router;
   final LcmCounters counters;
@@ -470,7 +482,7 @@ class _UdpLink {
         sender: '${datagram.address.address}:${datagram.port}',
       );
       if (message == null) continue;
-      if (!channels.contains(message.channel)) continue;
+      if (!allChannels && !channels.contains(message.channel)) continue;
       router.handle(message);
     }
   }

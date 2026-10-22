@@ -80,6 +80,10 @@ flutter run -d android --dart-define=ROBOT_IP=192.168.13.4
 | `LCM_GROUP` / `LCM_PORT` | `239.255.76.67:7667` | 相机组播 |
 | `LCM_JOINT_GROUP` / `LCM_JOINT_PORT` | `239.255.76.68:7668` | 关节组播 |
 | `LCM_IFACE` | 空 | 只加入指定网卡 |
+| `LCM_ALL` | `false` | 收组播里的所有通道，排查通道名时用 |
+
+机器人 IP 连接成功后会记住：桌面写 `~/.tavi_capture/ip.json`，移动端 HOME
+不可写时退回系统临时目录。
 
 ## 本地联调
 

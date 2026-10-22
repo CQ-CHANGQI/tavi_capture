@@ -119,7 +119,10 @@ class LivePreview extends ChangeNotifier {
       if (bytes == null) break;
       ui.Codec? codec;
       try {
-        codec = await ui.instantiateImageCodec(bytes);
+        // 源比屏幕大很多时按 1280 宽解码；正常 640×360 不缩放。
+        final size = imageSizeOf(bytes);
+        final targetWidth = size != null && size.$1 > 1280 ? 1280 : null;
+        codec = await ui.instantiateImageCodec(bytes, targetWidth: targetWidth);
         final frame = await codec.getNextFrame();
         if (_disposed) {
           frame.image.dispose();
