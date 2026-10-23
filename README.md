@@ -54,8 +54,8 @@ server/         单文件 MCAP Range 服务器（联调用）
   `ShellRoute` 保持，`AppState` 不再保存当前页面。
 - mock：任务、采集条、进程、日志、设备状态、采集计时/FSM、手动控制回位；
   采集条只写内存，录制服务未接。没有登录和权限。
-- `doc/pad-*.md`、`doc/robot-api.md` 是接后端的目标方案，不是当前实现；
-  `doc/lcm-*`、`doc/mcap-playback-design.md` 描述的是当前实现。
+- `doc/robot-api.md` 是接后端的目标方案，不是当前实现；
+  `doc/lcm-design-dev-full.md`、`doc/mcap-playback-design.md` 描述的是当前实现。
 
 ## 运行
 
@@ -111,12 +111,13 @@ dart run tool/mcap_check.dart http://<host>:8090/<file>.mcap  # MCAP 话题/解�
 
 ## 已知限制
 
-- 任务、采集条、用户、进程、日志仍是原型里的模拟数据；录制服务未接，
+- 任务、采集条、进程、日志仍是原型里的模拟数据；录制服务未接，
   「停止并保存」只写内存，不会真的上传。
-- 机器人 IP 不做持久化：启动使用 `--dart-define=ROBOT_IP` 的默认值，设置页改
-  IP 只影响本次运行。
-- 冷启动默认已登录张三（工程师），`online` 恒为 true；登录弹层只用于切换账号，
-  离线相关分支当前走不到。
+- 没有登录、角色、权限；页面只有连接、采集、查看数据、手动模式，设置是弹层。
+- 机器人 IP 目前只在内存（`configuredIp` / `savedIp`）：设置页保存只改内存，
+  下次启动仍回到 `--dart-define=ROBOT_IP` 的默认值，配置文件持久化未接。
+- 模式和机器人/云端接口的当前约定以 [`doc/robot-api.md`](doc/robot-api.md) 为准；
+  代码里的业务数据还没接真实接口。
 - 每一条采集条都指向同一个 `MCAP_URL` 或默认地址，这是原型行为；接后端后按
   记录存地址。
 - MCAP 只支持未压缩 / `zlib` chunk，且文件必须带 summary。

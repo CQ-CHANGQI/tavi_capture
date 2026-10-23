@@ -1,52 +1,46 @@
 # AGENTS.md
 
-开发平台是 macOS。这个仓库需要在移动端和桌面端跑起来，不需要兼容 Web
-（浏览器打不开裸 UDP 组播，实时预览只用 LCM 组播）。
+本文件是开发规范。安装、运行、平台支持、目录结构看 [README.md](README.md)；模式和接口约定看 [doc/robot-api.md](doc/robot-api.md)。
 
-## 平台
+## 动手前
 
-- 目标：Android、iOS、macOS、Windows、Linux。
-- 不要加 `kIsWeb` 分支、web stub、`dart:html` 回退，也不要恢复 `web/` runner。
-- `lib/` 下可以直接用 `dart:io`。
+- 先读 README、`doc/robot-api.md` 里相关接口/模式，再看要改的代码。
+- 不凭记忆补页面、字段或交互；文档没写的先确认，不要自己发明。
+- 先理解完整调用链再改，取能解决问题的最小改动。
+- 接口/模式变了，同步改 `doc/robot-api.md`；页面交互看最新原型，不要代码一套、文档一套。
 
-## 代码地图
+## 架构边界
 
-- `lib/core/lcm/`：
-  - `lcm_message.dart`：UDP 数据报 → LCM 消息，长包按发送方+seq 重组；
-  - `preview_protocol.dart`：`preview_package_t` 分片重组、`joint_batch_t`
-    解码、通道路由；
-  - `lcm_receiver.dart`：组播、网卡、接收 isolate、统计；
-  - `multicast_lock.dart`：Android MulticastLock。
-  纯 Dart，不依赖 widget。
-- `lib/core/mcap/`：MCAP over HTTP Range、CDR 解码（Image / CompressedImage /
-  JointState / Statistics）。纯 Dart。
-- `lib/core/app_state.dart`：全部页面的业务状态和动作，页面不自己存业务状态。
-- `lib/core/live_preview.dart` / `playback.dart`：实时与回放两个控制器，
-  负责解码 `ui.Image` 和给图表喂数据。
-- `lib/router/`：`go_router` 路由表；`app_routes.dart` 是路径常量，
-  `app_router.dart` 负责 `ShellRoute`、redirect 和离开采集页的 `onExit`。
-- `lib/screens/`、`lib/ui/`：按 `端侧采集平板 2.html` 实现的界面，颜色和尺寸
-  以 `lib/core/theme.dart` 为准。
+- Widget 只做渲染和局部 UI 状态；业务状态、动作放 `AppState`。
+- 实时流和回放各自用 `LivePreview` / `PlaybackController`，不要把这些状态塞进 `AppState` 每帧 notify。
+- Widget 不直接开 socket / HTTP；走 `AppState` 或现有 Controller。
+- 页面跳转只走 `go_router`，不要用 `Navigator.push(MaterialPageRoute(...))`，不要自己维护页面栈。
+- 优先复用现有 `theme.dart` 组件和已有 Controller，不复制一套相似实现。
+- 不新增依赖，除非标准库/现有依赖确实解决不了；加之前说明理由。
+- 不支持 Web：不要加 `kIsWeb` 分支、web stub、`dart:html` 或 `web/` runner。
+- 平台配置（iOS 组播 entitlement、Android MulticastLock、macOS 沙箱）不要删。
 
-## 约定
+## 代码规范
 
-- 业务数据（任务、采集条、进程、日志）仍是原型模拟数据；接接口时改
-  `AppState`，不要往 widget 里塞数据。
-- 机器人 IP 来自 `ROBOT_IP` 或 `configuredIp`，目前只在内存，不跨启动保存；
-  没有登录、角色、权限；模式只有 `collect / review / control`，默认 `review`，
-  没有 `idle`。不要恢复已删除的首页、任务页、已采页、独立回看页和登录弹层。
-- 实时链路只订阅、不发布；相机通道 `/preview/cameras/<name>`，关节
-  `/preview/joint_batch`。
-- 页面跳转走 go_router（`context.go/push/pushReplacement/pop`），不要再用
-  `Navigator.push(MaterialPageRoute(...))` 或自己维护页面栈。
-- UI 不直接开 socket / HTTP，走 `LivePreview` 和 `PlaybackController`。
-- 新增页面先看原型里有没有，不自己发明交互。新增页面同时加 `AppRoutes`
-  常量和 `app_router.dart` 里的 `GoRoute`。
+- 提交前跑 `dart format`；不要留调试 print、注释掉的代码、未使用字段。
+- 一个改动只做一件事，不顺手大重构。
+- 异步回调检查 `mounted`；Controller、Timer、Listener 在 `dispose` 里释放。
+- 高频数据不要每帧 `notifyListeners()` 重建整页，只重建对应面板。
+- 接口字段只保留一份定义，不要在 widget 里另造一套模型。
 
-## 检查
+## 测试
 
-```bash
-flutter analyze
-flutter test
-dart run tool/e2e_check.dart
-```
+- 完成前至少跑：
+  - `flutter analyze`
+  - `flutter test`
+  - `dart run tool/e2e_check.dart`（涉及接收链路时）
+- 非 trivial 逻辑补一个最小测试；改行为时同步改已有测试。
+- 不要为了过测试删断言或放宽预期。
+- 文档改动也要保证不留下失效链接和旧路径。
+
+## 不要做
+
+- 不要恢复已删除的首页、任务页、已采页、登录页/弹层、独立回看页。
+- 不要在 widget 里直接写业务数据或网络请求。
+- 不要引入 `Navigator` 页面栈、Web 支持、未使用依赖。
+- 不要把产品需求、接口字段、设计长文写回 `AGENTS.md`；它们属于 `README.md` 和 `doc/`。

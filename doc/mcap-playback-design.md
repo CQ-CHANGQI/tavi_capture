@@ -302,8 +302,7 @@ lib/ui/replay_panel.dart            回放面板
 lib/ui/playbar.dart                 播放条
 lib/ui/camera.dart                  相机网格/全屏
 lib/ui/joints.dart                  关节图表
-lib/screens/library.dart            查看数据
-lib/screens/review.dart             回看
+lib/screens/review.dart             查看数据 / 内嵌回放
 server/main.go                      本地 Range 服务
 tool/mcap_check.dart                命令行验包
 ```
