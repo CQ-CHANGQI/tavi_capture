@@ -299,7 +299,7 @@ IP 不做持久化，每次启动用默认值或者 `--dart-define`。业务任�
 ## 12. 测试
 
 - `test/lcm_protocol_test.dart`：短包、长包乱序、缺片过期、preview 重组、同尺寸不串帧、旧帧忽略、每流 3 个半成品、坏分片、joint 解码、通道路由、LCM_ALL、图片尺寸解析、坏图过滤。
-- `test/app_smoke_test.dart`：页面链路和手机宽度；另外有一条 mock 不按 IP 过滤。
+- `test/app_smoke_test.dart`：页面链路和手机宽度。
 - e2e：真起 Python 发布端，收到 12 帧（4 相机 ×3 轮）、3 批关节、20 个位置值，`corrupt=0`。
 
 现场验收顺序：先 `live_check` 看四路 fps 和 interfaces，再开采集页看角标，然后拔插网线看 2 秒内能不能自己 join 回来，最后限速/丢包看 `incomplete` 和画面是不是只丢帧、不冻结。

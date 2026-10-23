@@ -6,7 +6,7 @@ import 'camera.dart';
 import 'joints.dart';
 import 'playbar.dart';
 
-/// 回放面板：标题 + 四路画面 + 三组关节 + 播放条。库和回看页共用。
+/// 回放面板：标题 + 四路画面 + 三组关节 + 播放条。查看数据页使用。
 class ReplayPanel extends StatelessWidget {
   const ReplayPanel({
     super.key,
@@ -16,6 +16,7 @@ class ReplayPanel extends StatelessWidget {
     this.actions = const [],
     this.onRetry,
     this.padding = 10,
+    this.maximized = false,
   });
 
   final PlaybackController? player;
@@ -24,10 +25,19 @@ class ReplayPanel extends StatelessWidget {
   final List<Widget> actions;
   final VoidCallback? onRetry;
   final double padding;
+  final bool maximized;
 
   @override
   Widget build(BuildContext context) {
     final current = player;
+    if (current == null) return _build(null);
+    return ListenableBuilder(
+      listenable: current,
+      builder: (context, _) => _build(current),
+    );
+  }
+
+  Widget _build(PlaybackController? current) {
     return Panel(
       padding: EdgeInsets.all(padding),
       child: Column(
@@ -79,7 +89,10 @@ class ReplayPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Expanded(child: _body(current)),
-          if (current != null && !current.loading && current.error == null) ...[
+          if (current == null) ...[
+            const SizedBox(height: 8),
+            const EmptyPlayBar(),
+          ] else if (!current.loading && current.error == null) ...[
             const SizedBox(height: 8),
             PlayBar(player: current),
           ],
@@ -91,9 +104,16 @@ class ReplayPanel extends StatelessWidget {
   Widget _body(PlaybackController? player) {
     if (player == null) {
       return const Center(
-        child: Text(
-          '请先选择左侧一条数据查看',
-          style: TextStyle(fontSize: 14, color: C.muted),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('🎬', style: TextStyle(fontSize: 42)),
+            SizedBox(height: 12),
+            Text(
+              '请先选择左侧一条数据查看',
+              style: TextStyle(fontSize: 14, color: C.muted),
+            ),
+          ],
         ),
       );
     }
@@ -142,6 +162,20 @@ class ReplayPanel extends StatelessWidget {
         ),
       );
     }
+    if (maximized) {
+      return SingleChildScrollView(
+        child: Column(
+          children: [
+            SizedBox(
+              height: 340,
+              child: CameraGrid(images: player.cameras, player: player),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(height: 700, child: JointColumn(player: player)),
+          ],
+        ),
+      );
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 760) {
@@ -150,7 +184,7 @@ class ReplayPanel extends StatelessWidget {
               children: [
                 SizedBox(
                   height: 250,
-                  child: CameraGrid(images: player.cameras),
+                  child: CameraGrid(images: player.cameras, player: player),
                 ),
                 const SizedBox(height: 8),
                 SizedBox(height: 420, child: JointColumn(player: player)),
@@ -161,7 +195,10 @@ class ReplayPanel extends StatelessWidget {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(flex: 135, child: CameraGrid(images: player.cameras)),
+            Expanded(
+              flex: 135,
+              child: CameraGrid(images: player.cameras, player: player),
+            ),
             const SizedBox(width: 8),
             Expanded(flex: 65, child: JointColumn(player: player)),
           ],

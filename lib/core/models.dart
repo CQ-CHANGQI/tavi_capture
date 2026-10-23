@@ -13,6 +13,9 @@ enum PageMode {
 
 enum ModalKind { brief, settings, recover, loading }
 
+/// 存储分级，对应顶栏胶囊颜色和是否允许开始采集。
+enum StorageLevel { ok, warn, low }
+
 enum JointMode {
   command('指令'),
   state('状态'),
@@ -68,7 +71,8 @@ class TakeRecord {
     required this.person,
     required this.robot,
     required this.valid,
-  });
+    String? takeName,
+  }) : takeName = takeName ?? _defaultTakeName(task, time);
 
   final String task;
   final String time;
@@ -76,31 +80,18 @@ class TakeRecord {
   final String size;
   final String person;
   final String robot;
+  final String takeName;
 
   /// 有效/无效可以改，所以不是 final。
   bool valid;
 
   String get duration => formatClock(durationSeconds);
-  String get personName => person;
-  String get robotName => robot;
-
-  String get fileName =>
-      '${task}_${time.replaceAll(' ', '_').replaceAll(':', '')}.mcap';
+  String get fileName => '$takeName.mcap';
   String get storagePath =>
       '/data/episodes/$task/${time.replaceAll(' ', '_').replaceAll(':', '')}/';
-  String get takeName => fileName.substring(0, fileName.length - 5);
 
-  TakeRecord copy() => TakeRecord(
-    task: task,
-    time: time,
-    durationSeconds: durationSeconds,
-    size: size,
-    person: person,
-    robot: robot,
-    valid: valid,
-  );
-
-  String get statusText => valid ? '有效' : '无效';
+  static String _defaultTakeName(String task, String time) =>
+      '${task}_${time.replaceAll(' ', '_').replaceAll(':', '')}';
 }
 
 class LogLine {

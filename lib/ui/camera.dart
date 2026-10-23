@@ -3,15 +3,19 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../core/models.dart';
+import '../core/playback.dart';
+import '../core/scope.dart';
 import '../core/theme.dart';
+import 'playbar.dart';
 
-/// 四路相机：主视角占满第一行，下面左腕/右腕/全景。
+/// 四路相机 2×2 平均分布。
 class CameraGrid extends StatelessWidget {
   const CameraGrid({
     super.key,
     required this.images,
     this.fps,
     this.dead = const {},
+    this.player,
     this.gap = 8,
   });
 
@@ -19,8 +23,9 @@ class CameraGrid extends StatelessWidget {
   final Map<String, ui.Image> images;
   final double Function(String camera)? fps;
 
-  /// 明确显示“无画面”的相机（红字 + 红色条纹）。
+  /// 明确显示“无画面”的相机。
   final Set<String> dead;
+  final PlaybackController? player;
   final double gap;
 
   @override
@@ -30,17 +35,23 @@ class CameraGrid extends StatelessWidget {
       image: images[camera.channel],
       fps: fps?.call(camera.channel),
       dead: dead.contains(camera.channel),
+      player: player,
     );
     return Column(
       children: [
-        Expanded(flex: 145, child: tile(CameraId.head)),
-        SizedBox(height: gap),
         Expanded(
-          flex: 85,
           child: Row(
             children: [
-              Expanded(child: tile(CameraId.left)),
+              Expanded(child: tile(CameraId.head)),
               SizedBox(width: gap),
+              Expanded(child: tile(CameraId.left)),
+            ],
+          ),
+        ),
+        SizedBox(height: gap),
+        Expanded(
+          child: Row(
+            children: [
               Expanded(child: tile(CameraId.right)),
               SizedBox(width: gap),
               Expanded(child: tile(CameraId.chest)),
@@ -59,12 +70,14 @@ class CameraTile extends StatelessWidget {
     required this.image,
     this.fps,
     this.dead = false,
+    this.player,
   });
 
   final CameraId camera;
   final ui.Image? image;
   final double? fps;
   final bool dead;
+  final PlaybackController? player;
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +132,10 @@ class CameraTile extends StatelessWidget {
   Future<void> _fullscreen(BuildContext context) async {
     final source = image;
     if (source == null) return;
+    AppScope.of(context).telemetry
+        .track('click_cam_full', {'camera': camera.channel});
     final clone = source.clone();
+    final playback = player;
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black,
@@ -130,6 +146,18 @@ class CameraTile extends StatelessWidget {
             Positioned.fill(
               child: RawImage(image: clone, fit: BoxFit.contain),
             ),
+            if (playback != null)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 12,
+                child: SafeArea(
+                  child: ListenableBuilder(
+                    listenable: playback,
+                    builder: (context, _) => PlayBar(player: playback),
+                  ),
+                ),
+              ),
             Positioned(
               right: 16,
               top: 16,

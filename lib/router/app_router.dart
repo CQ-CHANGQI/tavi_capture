@@ -14,9 +14,15 @@ GoRouter createRouter(AppState app) {
     initialLocation: app.robotOk
         ? AppRoutes.forMode(app.mode)
         : AppRoutes.setup,
+    refreshListenable: app,
     redirect: (context, state) {
-      if (!app.robotOk && state.matchedLocation != AppRoutes.setup) {
-        return AppRoutes.setup;
+      if (!app.robotOk) {
+        return state.matchedLocation == AppRoutes.setup
+            ? null
+            : AppRoutes.setup;
+      }
+      if (state.matchedLocation == AppRoutes.setup) {
+        return AppRoutes.forMode(app.mode);
       }
       return null;
     },

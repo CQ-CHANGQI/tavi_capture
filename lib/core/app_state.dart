@@ -4,9 +4,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'config_store.dart';
 import 'live_preview.dart';
 import 'models.dart';
 import 'playback.dart';
+import 'telemetry.dart';
 
 const defaultRobotIp = String.fromEnvironment(
   'ROBOT_IP',
@@ -18,10 +20,17 @@ const demoMode = bool.fromEnvironment('DEMO');
 
 /// 全部页面的业务状态和动作。页面栈由 go_router 管理。
 class AppState extends ChangeNotifier {
-  AppState() {
+  AppState({ConfigStore? configStore})
+    : configStore = configStore ?? ConfigStore() {
     _takes = _seedTakes();
     localTasks = _seedTasks();
   }
+
+  final ConfigStore configStore;
+  final Telemetry telemetry = Telemetry();
+
+  /// 测试里可以设成 0，避免每个模式切换都等 1.5 秒。
+  static Duration modeSwitchDelay = const Duration(milliseconds: 1500);
 
   // ---------------------------------------------------------------- 弹层
   ModalKind? modal;
@@ -31,6 +40,7 @@ class AppState extends ChangeNotifier {
   String loadingSub = '';
   String briefTask = '';
   String recoverKind = '';
+  String confirmLabel = '确定';
   int homeIndex = 0;
 
   void openModal(ModalKind kind, {String title = '', String text = ''}) {
@@ -40,12 +50,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void openLoading(String text, [String sub = '']) {
+    loadingText = text;
+    loadingSub = sub;
+    modal = ModalKind.loading;
+    notifyListeners();
+  }
+
   void closeModal() {
     modal = null;
     notifyListeners();
   }
 
   void showBrief(String task) {
+    telemetry.track('click_brief', {'task': task});
     briefTask = task;
     openModal(ModalKind.brief);
   }
@@ -68,10 +86,10 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------ 连接/模式
   String savedIp = defaultRobotIp;
   String configuredIp = defaultRobotIp;
+  bool hasSavedIp = false;
   bool connecting = false;
   bool robotOk = false;
   String connectError = '';
-  bool booted = false;
 
   PageMode mode = PageMode.review;
 
@@ -85,19 +103,31 @@ class AppState extends ChangeNotifier {
   String get currentRobotName =>
       _ledger.where((r) => r.$1 == savedIp).firstOrNull?.$2 ?? savedIp;
 
-  Future<void> boot() async {
-    booted = true;
+  /// 读本地配置；有已保存 IP 时自动连接一次。
+  Future<void> init() async {
+    final saved = await configStore.loadRobotIp();
+    if (_disposed || saved == null) return;
+    hasSavedIp = true;
+    configuredIp = saved;
+    notifyListeners();
+    await autoConnect();
   }
 
-  /// 用户点“保存并连接”才调用；App 启动不自动连接。
-  Future<void> connect(String rawIp) async {
+  Future<void> autoConnect() async {
+    if (_disposed || !hasSavedIp || robotOk || connecting) return;
+    await connect(configuredIp);
+  }
+
+  /// 用户点“保存并连接”时调用；启动自动连接也走这里。
+  Future<bool> connect(String rawIp) async {
     final ip = rawIp.trim();
     if (!isValidIp(ip)) {
       connecting = false;
       robotOk = false;
       connectError = 'IP 地址格式不正确。四段都要填写，每段 0–255。';
       notifyListeners();
-      return;
+      _showConnectFailure(ip, 'IP 地址格式不正确，请检查四段地址。');
+      return false;
     }
 
     connecting = true;
@@ -106,24 +136,72 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     final ok = demoMode || await _probe(ip);
-    if (_disposed) return;
+    if (_disposed) return false;
     connecting = false;
 
     if (!ok) {
       connectError = '机器人无响应。检查已上电、和平板同一网段、IP 是否写对。';
       notifyListeners();
-      return;
+      _showConnectFailure(ip, '机器人无响应。请确认已上电、与平板同一网段、IP 填写正确。');
+      return false;
     }
 
     savedIp = ip;
     configuredIp = ip;
+    hasSavedIp = true;
     robotOk = true;
     mode = PageMode.review;
     _resetReview();
     stopServices();
     _startLive();
     notifyListeners();
+    await configStore.saveRobotIp(ip);
     toast('机器人已连接');
+    await _showEntryLoading('正在进入查看数据');
+    return true;
+  }
+
+  /// 设置页“保存并连接”：保持当前连接，成功后才切 IP。
+  Future<bool> reconnect(String rawIp) async {
+    final ip = rawIp.trim();
+    if (!isValidIp(ip)) {
+      toast('IP 地址格式不正确');
+      return false;
+    }
+    if (!robotOk) return connect(ip);
+
+    connecting = true;
+    connectError = '';
+    notifyListeners();
+
+    final ok = demoMode || await _probe(ip);
+    if (_disposed) return false;
+    connecting = false;
+
+    if (!ok) {
+      notifyListeners();
+      toast('连接失败，仍使用当前机器人');
+      return false;
+    }
+
+    savedIp = ip;
+    configuredIp = ip;
+    hasSavedIp = true;
+    notifyListeners();
+    await configStore.saveRobotIp(ip);
+    if (_live == null || !_live!.running) _startLive();
+    toast('机器人已连接');
+    return true;
+  }
+
+  void _showConnectFailure(String ip, String detail) {
+    showRecover('连接机器人失败', '连不上 $ip。$detail', kind: 'connect');
+  }
+
+  Future<void> _showEntryLoading(String text) async {
+    openLoading(text);
+    await Future<void>.delayed(modeSwitchDelay);
+    if (!_disposed && modal == ModalKind.loading) closeModal();
   }
 
   Future<bool> _probe(String ip) async {
@@ -143,16 +221,55 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
-  /// 设置页只保存 IP，下次启动生效；不重连当前机器人。
-  bool saveIp(String rawIp) {
-    final ip = rawIp.trim();
-    if (!isValidIp(ip)) {
-      toast('IP 地址格式不正确');
+  Future<bool> switchMode(PageMode next) async {
+    if (!robotOk || recording || next == mode) return false;
+    openLoading(
+      next == PageMode.review ? '正在进入查看数据' : '正在启动服务',
+      next == PageMode.collect
+          ? '机械臂 · 底盘 · VR · 四路相机'
+          : next == PageMode.control
+          ? '双臂 · 底盘'
+          : '',
+    );
+    await Future<void>.delayed(modeSwitchDelay);
+    if (_disposed) return false;
+
+    final entered = enterMode(next);
+    if (!entered) {
+      closeModal();
       return false;
     }
-    configuredIp = ip;
-    toast('IP 已保存，下次启动生效');
+    if (!_modeServicesOk(next)) {
+      _fallbackToReview();
+      closeModal();
+      _showServiceFailure(next);
+      return false;
+    }
+    closeModal();
     return true;
+  }
+
+  bool _modeServicesOk(PageMode mode) => switch (mode) {
+    PageMode.collect => armServiceOk && baseServiceOk && vrOk && camOk,
+    PageMode.control => armServiceOk || baseServiceOk,
+    PageMode.review => true,
+  };
+
+  void _fallbackToReview() {
+    mode = PageMode.review;
+    stopServices();
+    _resetReview();
+    notifyListeners();
+  }
+
+  void _showServiceFailure(PageMode failedMode) {
+    showRecover(
+      '启动服务失败',
+      failedMode == PageMode.control
+          ? '双臂、底盘服务都启动失败，已回到查看数据页。可从设置重新连接。'
+          : '采集所需服务启动失败，已回到查看数据页。可从设置重新连接。',
+      kind: 'service',
+    );
   }
 
   bool enterMode(PageMode next) {
@@ -162,11 +279,13 @@ class AppState extends ChangeNotifier {
       return false;
     }
     mode = next;
+    telemetry.track('enter_mode', {'mode': next.name});
+    telemetry.track('enter_page', {'page': next.name});
     closePlayback();
     switch (next) {
       case PageMode.collect:
-        collectTask = '';
-        collectPerson = '';
+        collectTask = localTasks.isEmpty ? '' : localTasks.first.name;
+        collectPerson = collectTaskItem?.persons.firstOrNull ?? '';
         lastTakeState = '—';
         elapsedSec = 0;
         _startCollectServices();
@@ -328,14 +447,36 @@ class AppState extends ChangeNotifier {
     ),
   ];
 
+  Future<void> requestCollectTask(String name) async {
+    if (recording || name == collectTask) return;
+    final ok = await confirmAction(
+      '切换任务',
+      '确认切换到任务「$name」？切换后进入该任务的采集页。',
+      label: '确认切换',
+    );
+    if (!ok) return;
+    setCollectTask(name);
+  }
+
   void setCollectTask(String name) {
     if (recording) {
       toast('采集中不能切换任务');
       return;
     }
     collectTask = name;
-    collectPerson = '';
+    collectPerson = collectTaskItem?.persons.firstOrNull ?? '';
     notifyListeners();
+  }
+
+  Future<void> requestCollectPerson(String name) async {
+    if (recording || name == collectPerson) return;
+    final ok = await confirmAction(
+      '切换人员',
+      '确认将当前采集员切换为「$name」？',
+      label: '确认切换',
+    );
+    if (!ok) return;
+    setCollectPerson(name);
   }
 
   void setCollectPerson(String name) {
@@ -364,7 +505,21 @@ class AppState extends ChangeNotifier {
   bool get baseServiceOk => _baseService;
 
   double storageGb = 805;
-  String get storageText => '剩余 ${storageGb.round()}GB';
+
+  StorageLevel get storageLevel => storageGb >= 50
+      ? StorageLevel.ok
+      : storageGb >= 20
+      ? StorageLevel.warn
+      : StorageLevel.low;
+
+  String get storageText {
+    final gb = storageGb.round();
+    return switch (storageLevel) {
+      StorageLevel.ok => '剩余 $gb GB',
+      StorageLevel.warn => '剩余 $gb GB · 建议上传',
+      StorageLevel.low => '存储不足 $gb GB',
+    };
+  }
 
   void _startCollectServices() {
     _armService = true;
@@ -380,11 +535,6 @@ class AppState extends ChangeNotifier {
     _camService = false;
   }
 
-  void startServices() {
-    _startCollectServices();
-    notifyListeners();
-  }
-
   void stopServices() {
     _armService = false;
     _baseService = false;
@@ -393,25 +543,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void showRecover(
-    String title,
-    String text, {
-    String kind = 'info',
-    int? homeTarget,
-  }) {
+  void showRecover(String title, String text, {String kind = 'info'}) {
     modalTitle = title;
     modalText = text;
     recoverKind = kind;
-    if (homeTarget != null) homeIndex = homeTarget;
     modal = ModalKind.recover;
     notifyListeners();
   }
 
   void cycleHome() {
-    if (!armServiceOk || !baseServiceOk) {
-      toast('双臂/底盘服务未就绪');
+    if (!armServiceOk) {
+      toast('双臂服务未就绪');
       return;
     }
+    telemetry.track('click_manual_home');
     const points = [('home 点', '零点位姿'), ('打包位姿', '打包准备位姿'), ('待定位姿', '待确认位姿')];
     final point = points[homeIndex % points.length];
     showRecover(
@@ -421,10 +566,14 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  void confirmHome() {
+  Future<void> confirmHome() async {
     const points = ['home 点', '打包位姿', '待定位姿'];
     final name = points[homeIndex % points.length];
     closeModal();
+    openLoading('正在移动双臂');
+    await Future<void>.delayed(const Duration(milliseconds: 1000));
+    if (_disposed) return;
+    if (modal == ModalKind.loading) closeModal();
     homeIndex++;
     toast('双臂已回「$name」');
   }
@@ -437,7 +586,14 @@ class AppState extends ChangeNotifier {
   Timer? _recTimer;
 
   bool get canStartCollect =>
-      robotOk && collectTaskItem != null && collectPerson.isNotEmpty;
+      robotOk &&
+      collectTaskItem != null &&
+      collectPerson.isNotEmpty &&
+      armServiceOk &&
+      baseServiceOk &&
+      vrOk &&
+      camOk &&
+      storageGb >= 20;
 
   void startCollect() {
     if (recording) return;
@@ -446,11 +602,19 @@ class AppState extends ChangeNotifier {
       return;
     }
     if (!canStartCollect) {
-      toast('请先选择任务和人员');
+      if (storageGb < 20) {
+        toast('存储不足，请先上传/清理后再采集');
+      } else if (collectTaskItem == null || collectPerson.isEmpty) {
+        toast('请先选择任务和人员');
+      } else {
+        toast('双臂/底盘/VR/相机服务未就绪');
+      }
       return;
     }
     recording = true;
     elapsedSec = 0;
+    telemetry.track('click_start', {'task': collectTask});
+    telemetry.track('capture_start', {'task': collectTask});
     _recTimer?.cancel();
     _recTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_disposed) return;
@@ -462,17 +626,15 @@ class AppState extends ChangeNotifier {
 
   void stopCollect() {
     if (!recording) return;
+    telemetry.track('click_save', {
+      'task': collectTask,
+      'duration': elapsedSec,
+    });
+    telemetry.track('capture_save', {
+      'task': collectTask,
+      'duration': elapsedSec,
+    });
     _addTake(valid: true);
-  }
-
-  void saveTake() => stopCollect();
-
-  void toggleRec() {
-    if (recording) {
-      stopCollect();
-    } else {
-      startCollect();
-    }
   }
 
   void _addTake({required bool valid}) {
@@ -491,32 +653,21 @@ class AppState extends ChangeNotifier {
       ),
     );
     storageGb = math.max<double>(0, ((storageGb - 1.1) * 10).round() / 10);
-    lastTakeState = valid ? '已保存' : '已作废';
+    lastTakeState = valid ? '已保存' : '已丢弃';
     _recTimer?.cancel();
     _recTimer = null;
     recording = false;
     elapsedSec = 0;
     notifyListeners();
-    toast(valid ? '本条已保存' : '本条已作废，保存为无效采集条');
-  }
-
-  void stopRecording({required bool keepTake}) {
-    if (keepTake && recording) {
-      _addTake(valid: true);
-      return;
-    }
-    _recTimer?.cancel();
-    _recTimer = null;
-    recording = false;
-    elapsedSec = 0;
-    if (!keepTake) lastTakeState = '已作废';
-    notifyListeners();
+    toast(valid ? '本条已保存' : '本条已丢弃，保存为无效采集条');
   }
 
   Future<void> dropTake() async {
     if (!recording) return;
-    final confirmed = await _confirm('作废本条？会保存为无效采集条。');
+    final confirmed = await _confirm('确认作废本条？');
     if (!confirmed) return;
+    telemetry.track('click_discard', {'task': collectTask});
+    telemetry.track('capture_discard', {'task': collectTask});
     _addTake(valid: false);
   }
 
@@ -536,6 +687,27 @@ class AppState extends ChangeNotifier {
   void resolveDrop(bool value) {
     _dropCompleter?.complete(value);
     _dropCompleter = null;
+    closeModal();
+  }
+
+  /// 通用的二次确认：任务/人员切换等。
+  Future<bool> confirmAction(String title, String text, {String label = '确定'}) {
+    final completer = Completer<bool>();
+    modalTitle = title;
+    modalText = text;
+    confirmLabel = label;
+    recoverKind = 'confirm';
+    modal = ModalKind.recover;
+    notifyListeners();
+    _actionCompleter = completer;
+    return completer.future;
+  }
+
+  Completer<bool>? _actionCompleter;
+
+  void resolveConfirm(bool value) {
+    _actionCompleter?.complete(value);
+    _actionCompleter = null;
     closeModal();
   }
 
@@ -613,6 +785,7 @@ class AppState extends ChangeNotifier {
   }
 
   void libPrev() {
+    telemetry.track('click_prev');
     final rows = libRows;
     final index = libSelected == null ? -1 : rows.indexOf(libSelected!);
     if (index < 0) return;
@@ -621,6 +794,7 @@ class AppState extends ChangeNotifier {
   }
 
   void libNext() {
+    telemetry.track('click_next');
     final rows = libRows;
     final index = libSelected == null ? -1 : rows.indexOf(libSelected!);
     if (index < 0) return;
@@ -650,6 +824,7 @@ class AppState extends ChangeNotifier {
 
   void toggleValid(TakeRecord take) {
     take.valid = !take.valid;
+    libPage = math.min(libPage, libPageCount - 1);
     if (libSelected == take && !libRows.contains(take)) {
       _clearLibSelection();
     } else {
@@ -662,7 +837,15 @@ class AppState extends ChangeNotifier {
     for (final group in JointGroup.values) group: JointMode.command,
   };
 
+  void trackManualMove(String direction) {
+    telemetry.track('manual_move', {'direction': direction});
+  }
+
   void setJointMode(JointGroup group, JointMode mode) {
+    telemetry.track('switch_joint_mode', {
+      'group': group.name,
+      'mode': mode.name,
+    });
     jointModes[group] = mode;
     notifyListeners();
   }
@@ -678,13 +861,7 @@ class AppState extends ChangeNotifier {
     _disposePlayback();
     final controller = PlaybackController(url: defaultMcapUrl(savedIp));
     _playback = controller;
-    controller.addListener(_onPlayback);
     unawaited(controller.open());
-  }
-
-  void _onPlayback() {
-    if (_disposed) return;
-    notifyListeners();
   }
 
   void closePlayback() => _disposePlayback();
@@ -692,7 +869,6 @@ class AppState extends ChangeNotifier {
   void _disposePlayback() {
     final controller = _playback;
     _playback = null;
-    controller?.removeListener(_onPlayback);
     controller?.dispose();
   }
 
@@ -744,18 +920,21 @@ class AppState extends ChangeNotifier {
   }
 
   void startProc() {
+    telemetry.track('service_start', {'name': services[selectedProc].name});
     services[selectedProc].running = true;
     toast('${services[selectedProc].name} 已启用');
     notifyListeners();
   }
 
   void stopProc() {
+    telemetry.track('service_stop', {'name': services[selectedProc].name});
     services[selectedProc].running = false;
     toast('${services[selectedProc].name} 已停止');
     notifyListeners();
   }
 
   void restartProc() {
+    telemetry.track('service_start', {'name': services[selectedProc].name});
     services[selectedProc].running = true;
     toast('${services[selectedProc].name} 已重启');
     notifyListeners();

@@ -30,7 +30,7 @@ class McapException implements Exception {
   String toString() => message;
 }
 
-/// Random-access view of an MCAP file served by Caddy.
+/// Random-access view of an MCAP file served over HTTP.
 ///
 /// Only the footer and summary section are fetched to build [McapSummary];
 /// chunks are fetched on demand when messages are read.
@@ -40,9 +40,16 @@ class McapRemoteFile {
           client ??
           (HttpClient()..connectionTimeout = const Duration(seconds: 8));
 
+  static const _timeout = Duration(seconds: 10);
+
   final Uri uri;
   final HttpClient _client;
   int? _length;
+
+  Future<T> _withTimeout<T>(Future<T> future) => future.timeout(
+    _timeout,
+    onTimeout: () => throw McapException('文件服务响应超时'),
+  );
 
   int get length {
     final length = _length;
@@ -55,15 +62,15 @@ class McapRemoteFile {
       throw McapException('只支持 http/https URL');
     }
 
-    final headRequest = await _client.headUrl(uri);
+    final headRequest = await _withTimeout(_client.headUrl(uri));
     headRequest.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    final head = await headRequest.close();
+    final head = await _withTimeout(headRequest.close());
     if (head.statusCode == HttpStatus.ok && head.contentLength > 0) {
       _length = head.contentLength;
-      await head.drain<void>();
+      await _withTimeout(head.drain<void>());
       return;
     }
-    await head.drain<void>();
+    await _withTimeout(head.drain<void>());
 
     final response = await _request(0, 0);
     if (response.statusCode != HttpStatus.partialContent) {
@@ -72,7 +79,7 @@ class McapRemoteFile {
       throw McapException('Caddy 未返回 206（HTTP $status），检查 Range 支持');
     }
     final range = response.headers.value(HttpHeaders.contentRangeHeader);
-    await response.drain<void>();
+    await _withTimeout(response.drain<void>());
     final total = int.tryParse(range?.split('/').last ?? '');
     if (total == null || total <= 0) {
       throw McapException('无法从 Content-Range 获取文件大小');
@@ -94,8 +101,13 @@ class McapRemoteFile {
     }
 
     final builder = BytesBuilder(copy: false);
-    await for (final chunk in response) {
-      builder.add(chunk);
+    try {
+      await for (final chunk in response.timeout(_timeout)) {
+        builder.add(chunk);
+      }
+    } on TimeoutException {
+      await _abort(response);
+      throw McapException('文件服务响应超时');
     }
     final bytes = builder.takeBytes();
     final expected = endInclusive - start + 1;
@@ -106,10 +118,10 @@ class McapRemoteFile {
   }
 
   Future<HttpClientResponse> _request(int start, int endInclusive) async {
-    final request = await _client.getUrl(uri);
+    final request = await _withTimeout(_client.getUrl(uri));
     request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$endInclusive');
     request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    return request.close();
+    return _withTimeout(request.close());
   }
 
   Future<void> _abort(HttpClientResponse response) async {
@@ -125,33 +137,17 @@ class McapRemoteFile {
 }
 
 class McapSchema {
-  McapSchema({
-    required this.id,
-    required this.name,
-    required this.encoding,
-    required this.data,
-  });
+  McapSchema({required this.name});
 
-  final int id;
   final String name;
-  final String encoding;
-  final Uint8List data;
 }
 
 class McapChannel {
-  McapChannel({
-    required this.id,
-    required this.schemaId,
-    required this.topic,
-    required this.messageEncoding,
-    required this.metadata,
-  });
+  McapChannel({required this.id, required this.schemaId, required this.topic});
 
   final int id;
   final int schemaId;
   final String topic;
-  final String messageEncoding;
-  final Map<String, String> metadata;
 }
 
 class McapChunkIndex {
@@ -161,9 +157,6 @@ class McapChunkIndex {
     required this.chunkStartOffset,
     required this.chunkLength,
     required this.messageIndexOffsets,
-    required this.compression,
-    required this.compressedSize,
-    required this.uncompressedSize,
   });
 
   final int messageStartTimeNs;
@@ -171,9 +164,6 @@ class McapChunkIndex {
   final int chunkStartOffset;
   final int chunkLength;
   final Map<int, int> messageIndexOffsets;
-  final String compression;
-  final int compressedSize;
-  final int uncompressedSize;
 }
 
 class McapMessage {
@@ -181,14 +171,12 @@ class McapMessage {
     required this.channelId,
     required this.sequence,
     required this.logTimeNs,
-    required this.publishTimeNs,
     required this.data,
   });
 
   final int channelId;
   final int sequence;
   final int logTimeNs;
-  final int publishTimeNs;
   final Uint8List data;
 }
 
@@ -265,27 +253,16 @@ class McapSummary {
         case _opSchema:
           final id = reader.u16();
           final name = reader.str();
-          final encoding = reader.str();
-          final data = reader.bytes(reader.u32());
-          schemas[id] = McapSchema(
-            id: id,
-            name: name,
-            encoding: encoding,
-            data: data,
-          );
+          reader.str(); // encoding
+          reader.bytes(reader.u32()); // schema data
+          schemas[id] = McapSchema(name: name);
         case _opChannel:
           final id = reader.u16();
           final schemaId = reader.u16();
           final topic = reader.str();
-          final messageEncoding = reader.str();
-          final metadata = reader.stringMap();
-          channels[id] = McapChannel(
-            id: id,
-            schemaId: schemaId,
-            topic: topic,
-            messageEncoding: messageEncoding,
-            metadata: metadata,
-          );
+          reader.str(); // message encoding
+          reader.stringMap(); // metadata
+          channels[id] = McapChannel(id: id, schemaId: schemaId, topic: topic);
         case _opStatistics:
           final messageCount = reader.u64();
           final schemaCount = reader.u16();
@@ -312,9 +289,9 @@ class McapSummary {
           final chunkLength = reader.u64();
           final messageIndexOffsets = reader.intMap();
           reader.u64(); // message_index_length
-          final compression = reader.str();
-          final compressedSize = reader.u64();
-          final uncompressedSize = reader.u64();
+          reader.str(); // compression
+          reader.u64(); // compressed_size
+          reader.u64(); // uncompressed_size
           chunks.add(
             McapChunkIndex(
               messageStartTimeNs: messageStartTimeNs,
@@ -322,9 +299,6 @@ class McapSummary {
               chunkStartOffset: chunkStartOffset,
               chunkLength: chunkLength,
               messageIndexOffsets: messageIndexOffsets,
-              compression: compression,
-              compressedSize: compressedSize,
-              uncompressedSize: uncompressedSize,
             ),
           );
       }
@@ -428,17 +402,10 @@ class McapChunkCursor {
   final int maxChunks;
   final List<McapChunkIndex> _chunks;
 
-  int _startTimeNs;
+  final int _startTimeNs;
   int _index = 0;
   int _loadedChunks = 0;
   _Reader? _reader;
-
-  void seek(int timeNs) {
-    _startTimeNs = timeNs;
-    _index = _findChunk(timeNs);
-    _loadedChunks = 0;
-    _reader = null;
-  }
 
   int _findChunk(int timeNs) {
     for (var i = 0; i < _chunks.length; i++) {
@@ -467,7 +434,7 @@ class McapChunkCursor {
           final channelId = reader.u16();
           final sequence = reader.u32();
           final logTimeNs = reader.u64();
-          final publishTimeNs = reader.u64();
+          reader.u64(); // publish_time
           final selected =
               (channelIds == null || channelIds!.contains(channelId)) &&
               logTimeNs >= _startTimeNs;
@@ -482,7 +449,6 @@ class McapChunkCursor {
               channelId: channelId,
               sequence: sequence,
               logTimeNs: logTimeNs,
-              publishTimeNs: publishTimeNs,
               data: data,
             );
           }

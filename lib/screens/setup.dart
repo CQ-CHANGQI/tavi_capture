@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import '../core/app_state.dart';
 import '../core/scope.dart';
 import '../core/theme.dart';
-import '../router/app_routes.dart';
 
-/// 首屏：填机器人 IP，用户点连接。App 启动不自动连接。
+/// 首屏：填机器人 IP，用户点连接。已保存 IP 时由 AppState 自动连接。
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
 
@@ -16,11 +14,12 @@ class SetupScreen extends StatefulWidget {
 
 class _SetupScreenState extends State<SetupScreen> {
   String? _ip;
+  bool _edited = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _ip ??= AppScope.of(context).configuredIp;
+    if (!_edited) _ip = AppScope.of(context).configuredIp;
   }
 
   @override
@@ -71,21 +70,21 @@ class _SetupScreenState extends State<SetupScreen> {
           IpSegments(
             initialIp: ip,
             enabled: !app.connecting,
-            onChanged: (value) => setState(() => _ip = value),
+            onChanged: (value) {
+              _edited = true;
+              setState(() => _ip = value);
+            },
           ),
           const SizedBox(height: 16),
           AppButton(
-            app.connecting ? '正在连接…' : '保存并连接',
+            app.connecting
+                ? '正在连接…'
+                : app.connectError.isEmpty
+                ? '保存并连接'
+                : '重新连接',
             block: true,
             height: 44,
-            onPressed: app.connecting
-                ? null
-                : () async {
-                    await app.connect(ip);
-                    if (!context.mounted || !app.robotOk) return;
-                    app.enterMode(app.mode);
-                    context.go(AppRoutes.forMode(app.mode));
-                  },
+            onPressed: app.connecting ? null : () => app.connect(ip),
           ),
           const SizedBox(height: 12),
           _status(app, ip),

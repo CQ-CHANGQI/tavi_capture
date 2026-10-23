@@ -41,7 +41,7 @@ class AppShell extends StatelessWidget {
                   Expanded(child: child),
                 ],
               ),
-              ModalHost(location: location),
+              ModalHost(),
               const ToastView(),
             ],
           ),
@@ -59,6 +59,7 @@ class TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
+    final mode = AppRoutes.modeOf(location) ?? app.mode;
     return Container(
       constraints: const BoxConstraints(minHeight: 64),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -112,9 +113,9 @@ class TopBar extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _ModeTabs(app: app),
+                      _ModeTabs(app: app, current: mode),
                       const SizedBox(width: 12),
-                      ..._chips(app),
+                      ..._chips(app, mode),
                     ],
                   ),
                 ),
@@ -134,7 +135,7 @@ class TopBar extends StatelessWidget {
     );
   }
 
-  List<Widget> _chips(AppState app) {
+  List<Widget> _chips(AppState app, PageMode mode) {
     if (!app.robotOk) {
       return [
         _ChipTap(
@@ -145,14 +146,22 @@ class TopBar extends StatelessWidget {
     }
 
     final chips = <Widget>[
-      if (app.mode == PageMode.collect) ...[
+      if (mode == PageMode.collect) ...[
         _tone(app.vrOk, 'VR'),
         _tone(app.gripperOk, '夹爪'),
       ],
-      _tone(app.armOk, '双臂'),
-      if (app.mode == PageMode.collect) _tone(app.camOk, '相机'),
-      _tone(app.baseOk, '底盘'),
-      StatusChip(app.storageText),
+      _tone(app.armServiceOk, '双臂'),
+      if (mode == PageMode.collect) _tone(app.camOk, '相机'),
+      _tone(app.baseServiceOk, '底盘'),
+      StatusChip(
+        app.storageText,
+        tone: switch (app.storageLevel) {
+          StorageLevel.ok => ChipTone.ok,
+          StorageLevel.warn => ChipTone.warn,
+          StorageLevel.low => ChipTone.bad,
+        },
+        tooltip: '机载存储 · ${app.storageText}',
+      ),
     ];
     return [
       for (var i = 0; i < chips.length; i++) ...[
@@ -162,14 +171,18 @@ class TopBar extends StatelessWidget {
     ];
   }
 
-  Widget _tone(bool ok, String label) =>
-      StatusChip(label, tone: ok ? ChipTone.ok : ChipTone.bad);
+  Widget _tone(bool ok, String label) => StatusChip(
+    label,
+    tone: ok ? ChipTone.ok : ChipTone.off,
+    tooltip: '$label · ${ok ? '已就绪' : '未启动'}',
+  );
 }
 
 class _ModeTabs extends StatelessWidget {
-  const _ModeTabs({required this.app});
+  const _ModeTabs({required this.app, required this.current});
 
   final AppState app;
+  final PageMode current;
 
   @override
   Widget build(BuildContext context) {
@@ -191,22 +204,21 @@ class _ModeTabs extends StatelessWidget {
   }
 
   Widget _tab(BuildContext context, PageMode mode) {
-    final inactive = app.recording;
-    final active = app.robotOk && !inactive && app.mode == mode;
+    final inactive = app.recording || !app.robotOk;
+    final active = app.robotOk && !inactive && current == mode;
     return InkWell(
-      onTap: () {
-        if (!app.robotOk) {
-          app.toast('请先连接机器人');
-          return;
-        }
-        if (app.recording) {
-          app.toast('请先结束采集');
-          return;
-        }
-        if (app.enterMode(mode)) {
-          context.go(AppRoutes.forMode(mode));
-        }
-      },
+      onTap: inactive
+          ? null
+          : () async {
+              final switched = await app.switchMode(mode);
+              if (!context.mounted) return;
+              if (switched) {
+                context.go(AppRoutes.forMode(mode));
+              } else if (app.mode == PageMode.review &&
+                  current != PageMode.review) {
+                context.go(AppRoutes.review);
+              }
+            },
       borderRadius: BorderRadius.circular(7),
       child: Opacity(
         opacity: inactive ? 0.45 : 1,

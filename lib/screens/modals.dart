@@ -1,17 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import '../core/app_state.dart';
 import '../core/models.dart';
 import '../core/scope.dart';
 import '../core/theme.dart';
-import '../router/app_routes.dart';
 
-/// 设置、采集说明、异常恢复、加载中。
+/// 设置、采集说明、异常恢复。
 class ModalHost extends StatelessWidget {
-  const ModalHost({super.key, required this.location});
-
-  final String location;
+  const ModalHost({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -253,7 +249,7 @@ class _SettingsModalState extends State<SettingsModal> {
       children: [
         const SectionTitle('机器人 IP'),
         const SizedBox(height: 4),
-        const Hint('修改后只保存到配置，下次启动生效。当前连接不变。'),
+        const Hint('保存并连接会立即重连；采集中不能修改 IP。'),
         const SizedBox(height: 8),
         IpSegments(
           initialIp: _ip ?? app.configuredIp,
@@ -264,19 +260,17 @@ class _SettingsModalState extends State<SettingsModal> {
         Row(
           children: [
             Expanded(
-              child: Hint(
-                widget.readOnly ? '采集中不能修改 IP。' : '当前连接的 IP 不会因为保存而改变。',
-              ),
+              child: Hint(widget.readOnly ? '采集中不能修改 IP。' : '重连成功前，当前连接保持不变。'),
             ),
             const SizedBox(width: 12),
             AppButton(
-              '保存',
+              '保存并连接',
               kind: BtnKind.ok,
               height: 44,
               onPressed: widget.readOnly
                   ? null
-                  : () {
-                      if (app.saveIp(_ip ?? app.configuredIp)) {
+                  : () async {
+                      if (await app.reconnect(_ip ?? app.configuredIp)) {
                         app.closeModal();
                       }
                     },
@@ -352,7 +346,9 @@ class _SettingsModalState extends State<SettingsModal> {
                     kind: BtnKind.ghost,
                     height: 32,
                     fontSize: 14,
-                    onPressed: selected.running ? null : app.startProc,
+                    onPressed: selected.running || widget.readOnly
+                        ? null
+                        : app.startProc,
                   ),
                   const SizedBox(width: 6),
                   AppButton(
@@ -360,7 +356,9 @@ class _SettingsModalState extends State<SettingsModal> {
                     kind: BtnKind.ghost,
                     height: 32,
                     fontSize: 14,
-                    onPressed: selected.running ? app.stopProc : null,
+                    onPressed: selected.running && !widget.readOnly
+                        ? app.stopProc
+                        : null,
                   ),
                   const SizedBox(width: 6),
                   AppButton(
@@ -368,10 +366,15 @@ class _SettingsModalState extends State<SettingsModal> {
                     kind: BtnKind.ghost,
                     height: 32,
                     fontSize: 14,
-                    onPressed: app.restartProc,
+                    onPressed: widget.readOnly ? null : app.restartProc,
                   ),
                 ],
               ),
+              if (widget.readOnly)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Hint('采集中进程管理只读，只能查看日志。'),
+                ),
               const SizedBox(height: 8),
               _logBox([for (final line in selected.logs) line], height: 280),
             ],
@@ -408,7 +411,7 @@ class _SettingsModalState extends State<SettingsModal> {
           AppButton(
             '下载',
             kind: BtnKind.ghost,
-            onPressed: () => app.toast('已下载操作日志（${app.logRows.length} 条）'),
+            onPressed: () => app.toast('日志下载待文件服务接入'),
           ),
         ],
       ),
@@ -442,7 +445,7 @@ class _SettingsModalState extends State<SettingsModal> {
         app.live?.isOnline('cam_chest') ?? false,
         app.live?.isOnline('cam_chest') ?? false ? '已上电' : '未上电',
       ),
-      ('机载存储', true, app.storageText),
+      ('机载存储', true, '剩余 ${app.storageGb.round()} GB'),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -550,10 +553,15 @@ class RecoverModal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final actions = _actions(context, app);
+    final actions = _actions(app);
+    final isHome = app.recoverKind == 'home';
+    final isError =
+        app.recoverKind == 'drop' ||
+        app.recoverKind == 'service' ||
+        app.recoverKind == 'connect';
     return _Dialog(
-      width: 760,
-      border: const Color(0xff6e322d),
+      width: isHome ? 420 : 760,
+      border: isError ? const Color(0xff6e322d) : C.line,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -563,6 +571,17 @@ class RecoverModal extends StatelessWidget {
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
+          if (isHome) ...[
+            Container(
+              height: 140,
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: C.input,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const CustomPaint(painter: _PosePainter()),
+            ),
+          ],
           Text(
             app.modalText,
             style: const TextStyle(fontSize: 15, height: 1.6, color: C.softInk),
@@ -579,50 +598,101 @@ class RecoverModal extends StatelessWidget {
     );
   }
 
-  List<Widget> _actions(BuildContext context, AppState app) =>
-      switch (app.recoverKind) {
-        'drop' => [
-          AppButton(
-            '确定',
-            kind: BtnKind.ok,
-            onPressed: () => app.resolveDrop(true),
-          ),
-          AppButton(
-            '取消',
-            kind: BtnKind.ghost,
-            onPressed: () => app.resolveDrop(false),
-          ),
-        ],
-        'home' => [
-          AppButton('确认移动', kind: BtnKind.ok, onPressed: app.confirmHome),
-          AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
-        ],
-        'device' => [
-          AppButton(
-            '确定',
-            onPressed: () {
-              final router = GoRouter.of(context);
-              app.closeModal();
-              router.go(AppRoutes.forMode(app.mode));
-            },
-          ),
-        ],
-        'service' => [
-          AppButton(
-            '去设置',
-            onPressed: () {
-              app.closeModal();
-              app.openModal(ModalKind.settings);
-            },
-          ),
-          AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
-        ],
-        _ => [AppButton('确定', onPressed: app.closeModal)],
-      };
+  List<Widget> _actions(AppState app) => switch (app.recoverKind) {
+    'drop' => [
+      AppButton('确定', kind: BtnKind.ok, onPressed: () => app.resolveDrop(true)),
+      AppButton(
+        '取消',
+        kind: BtnKind.ghost,
+        onPressed: () => app.resolveDrop(false),
+      ),
+    ],
+    'confirm' => [
+      AppButton(
+        app.confirmLabel,
+        kind: BtnKind.ok,
+        onPressed: () => app.resolveConfirm(true),
+      ),
+      AppButton(
+        '取消',
+        kind: BtnKind.ghost,
+        onPressed: () => app.resolveConfirm(false),
+      ),
+    ],
+    'home' => [
+      AppButton('确认移动', kind: BtnKind.ok, onPressed: app.confirmHome),
+      AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
+    ],
+    'service' => [
+      AppButton(
+        '去连接',
+        kind: BtnKind.ok,
+        onPressed: () {
+          app.closeModal();
+          app.openModal(ModalKind.settings);
+        },
+      ),
+      AppButton('确定', kind: BtnKind.ghost, onPressed: app.closeModal),
+    ],
+    _ => [AppButton('确定', onPressed: app.closeModal)],
+  };
+}
+
+/// 回位确认里的双臂位姿示意。
+class _PosePainter extends CustomPainter {
+  const _PosePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final base = Paint()..color = const Color(0xff203044);
+    final blue = Paint()
+      ..color = const Color(0xff3b82c4)
+      ..strokeWidth = 9
+      ..strokeCap = StrokeCap.round;
+    final purple = Paint()
+      ..color = const Color(0xff7c6adf)
+      ..strokeWidth = 8
+      ..strokeCap = StrokeCap.round;
+
+    final centerX = size.width / 2;
+    final bottom = size.height - 15;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(centerX, bottom), width: 70, height: 12),
+        const Radius.circular(3),
+      ),
+      base,
+    );
+    final joint = Offset(centerX, bottom - 40);
+    canvas.drawRect(
+      Rect.fromCenter(center: joint.translate(0, 20), width: 12, height: 40),
+      base,
+    );
+    canvas.drawLine(joint, Offset(centerX, bottom - 80), blue);
+    canvas.drawLine(
+      Offset(centerX, bottom - 80),
+      Offset(centerX + 35, bottom - 75),
+      purple,
+    );
+    canvas.drawCircle(joint, 6, Paint()..color = const Color(0xff2f6fb5));
+    canvas.drawCircle(
+      Offset(centerX, bottom - 80),
+      5,
+      Paint()..color = const Color(0xff5f54c0),
+    );
+    canvas.drawCircle(
+      Offset(centerX + 35, bottom - 75),
+      5,
+      Paint()..color = const Color(0xffd39a3a),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ---------------------------------------------------------------------------
-// 加载
+// 启动服务 / 页面切换
 // ---------------------------------------------------------------------------
 
 class LoadingModal extends StatelessWidget {
@@ -637,8 +707,8 @@ class LoadingModal extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(
-            width: 36,
-            height: 36,
+            width: 32,
+            height: 32,
             child: CircularProgressIndicator(strokeWidth: 3),
           ),
           const SizedBox(height: 14),

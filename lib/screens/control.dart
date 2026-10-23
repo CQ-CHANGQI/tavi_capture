@@ -19,7 +19,15 @@ class _ControlScreenState extends State<ControlScreen> {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final ready = app.armServiceOk && app.baseServiceOk;
+    final armReady = app.armServiceOk;
+    final baseReady = app.baseServiceOk;
+    final hint = armReady && baseReady
+        ? '双臂/底盘服务已就绪'
+        : armReady
+        ? '双臂就绪，底盘未启动'
+        : baseReady
+        ? '底盘就绪，双臂未启动'
+        : '等待双臂/底盘服务启动';
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -35,7 +43,7 @@ class _ControlScreenState extends State<ControlScreen> {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(width: 16),
-                  Hint(ready ? '双臂/底盘服务已就绪' : '等待双臂/底盘服务启动'),
+                  Hint(hint),
                 ],
               );
               return constraints.maxWidth < 720
@@ -72,12 +80,12 @@ class _ControlScreenState extends State<ControlScreen> {
                         '回 home 点',
                         kind: BtnKind.ghost,
                         height: 46,
-                        onPressed: ready ? app.cycleHome : null,
+                        onPressed: armReady ? app.cycleHome : null,
                       ),
                     ],
                   ),
                 );
-                final chassis = _zone(_chassis(app, ready, narrow));
+                final chassis = _zone(_chassis(app, baseReady, narrow));
                 if (narrow) {
                   return ListView(
                     children: [
@@ -106,7 +114,7 @@ class _ControlScreenState extends State<ControlScreen> {
   Widget _zone(Widget child) =>
       Panel(color: C.input, padding: const EdgeInsets.all(12), child: child);
 
-  Widget _chassis(AppState app, bool ready, bool narrow) {
+  Widget _chassis(AppState app, bool baseReady, bool narrow) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -137,16 +145,16 @@ class _ControlScreenState extends State<ControlScreen> {
                   size: size,
                   radius: radius,
                   fontSize: size * 0.44,
-                  onPressed: ready ? () {} : null,
+                  onPressed: baseReady ? () {} : null,
                 );
                 return Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _turn('↺', size, ready, () => _hold('左转中…')),
+                    _turn('↺', size, baseReady, () => _hold('左转中…')),
                     const SizedBox(width: gap),
                     _dpad(size, pad),
                     const SizedBox(width: gap),
-                    _turn('↻', size, ready, () => _hold('右转中…')),
+                    _turn('↻', size, baseReady, () => _hold('右转中…')),
                   ],
                 );
               },
@@ -167,7 +175,7 @@ class _ControlScreenState extends State<ControlScreen> {
                   (75, '快 75%'),
                   (100, '最快 100%'),
                 ],
-                onChanged: ready
+                onChanged: baseReady
                     ? (value) => setState(() => _speed = value ?? _speed)
                     : null,
               ),
@@ -242,7 +250,10 @@ class _ControlScreenState extends State<ControlScreen> {
   Widget _holdButton(Widget child, String action) => Listener(
     onPointerDown: (_) {
       final app = AppScope.of(context);
-      if (app.armServiceOk && app.baseServiceOk) _hold('$action中…');
+      if (app.baseServiceOk) {
+        app.trackManualMove(action);
+        _hold('$action中…');
+      }
     },
     onPointerUp: (_) => _release(),
     onPointerCancel: (_) => _release(),

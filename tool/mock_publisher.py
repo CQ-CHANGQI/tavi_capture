@@ -15,7 +15,7 @@ different JPEG/PNG instead.
 
 Examples
 --------
-    # 4 cameras x 20 joints, same shape as the Compose app's real data
+    # 4 cameras x 20 joints, same shape as the robot's real data
     python3 tool/mock_publisher.py --host 127.0.0.1
 
     # robot LAN / tablet: multicast, pick the Wi-Fi interface explicitly

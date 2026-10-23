@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 原型（端侧采集平板.html）里的调色板，逐项对应 CSS 变量。
+/// 原型里的调色板，逐项对应 CSS 变量。
 abstract final class C {
   static const bg = Color(0xff0e1622);
   static const panel = Color(0xff182433);
@@ -58,14 +58,6 @@ ThemeData taviTheme() {
     ),
   );
 }
-
-TextStyle tStyle({
-  double size = 15,
-  Color color = C.ink,
-  FontWeight weight = FontWeight.w400,
-  double height = 1.5,
-}) =>
-    TextStyle(fontSize: size, color: color, fontWeight: weight, height: height);
 
 /// 面板：bg panel + 1px line + 12 圆角。
 class Panel extends StatelessWidget {
@@ -168,7 +160,7 @@ class AppButton extends StatelessWidget {
   }
 }
 
-enum PillKind { plain, run, fix, done }
+enum PillKind { plain, run, fix }
 
 class Pill extends StatelessWidget {
   const Pill(this.text, {super.key, this.kind = PillKind.plain});
@@ -181,7 +173,6 @@ class Pill extends StatelessWidget {
     final (bg, fg) = switch (kind) {
       PillKind.run => (const Color(0xff1d3d31), const Color(0xff8ddeaf)),
       PillKind.fix => (const Color(0xff43361d), const Color(0xffefd09a)),
-      PillKind.done => (const Color(0xff2a3d55), const Color(0xffa8c8e8)),
       PillKind.plain => (const Color(0xff24384e), C.legendInk),
     };
     return Container(
@@ -195,26 +186,33 @@ class Pill extends StatelessWidget {
   }
 }
 
-enum ChipTone { ok, bad, warn }
+enum ChipTone { ok, off, warn, bad }
 
 class StatusChip extends StatelessWidget {
-  const StatusChip(this.text, {super.key, this.tone = ChipTone.ok});
+  const StatusChip(
+    this.text, {
+    super.key,
+    this.tone = ChipTone.ok,
+    this.tooltip,
+  });
 
   final String text;
   final ChipTone tone;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
     final (fg, border, dot) = switch (tone) {
       ChipTone.ok => (C.softInk, C.line, C.ok),
-      ChipTone.bad => (const Color(0xffffd0cb), const Color(0xff6e322d), C.bad),
+      ChipTone.off => (C.muted, C.line, C.muted),
       ChipTone.warn => (
         const Color(0xffefd09a),
         const Color(0xff6e5a2d),
         C.warn,
       ),
+      ChipTone.bad => (const Color(0xffffd0cb), const Color(0xff6e322d), C.bad),
     };
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: C.input,
@@ -233,6 +231,13 @@ class StatusChip extends StatelessWidget {
           Text(text, style: TextStyle(fontSize: 14, color: fg)),
         ],
       ),
+    );
+    final message = tooltip;
+    if (message == null) return chip;
+    return Tooltip(
+      message: message,
+      triggerMode: TooltipTriggerMode.tap,
+      child: chip,
     );
   }
 }
@@ -366,7 +371,7 @@ class AppSelect<T> extends StatelessWidget {
   );
 }
 
-/// 四个 IP 段，自动跳格，退格回上一格。
+/// 四个 IP 段，输入满 3 位自动跳下一格，清空当前格时回到上一格。
 class IpSegments extends StatefulWidget {
   const IpSegments({
     super.key,
@@ -437,7 +442,11 @@ class _IpSegmentsState extends State<IpSegments> {
               ],
               style: const TextStyle(fontSize: 17),
               onChanged: (value) {
-                if (value.length == 3 && i < 3) _nodes[i + 1].requestFocus();
+                if (value.length == 3 && i < 3) {
+                  _nodes[i + 1].requestFocus();
+                } else if (value.isEmpty && i > 0) {
+                  _nodes[i - 1].requestFocus();
+                }
                 widget.onChanged(_ip);
               },
               onSubmitted: (_) {

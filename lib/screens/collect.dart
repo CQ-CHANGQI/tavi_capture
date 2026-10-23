@@ -19,31 +19,41 @@ class CollectScreen extends StatelessWidget {
 
     final header = LayoutBuilder(
       builder: (context, constraints) {
+        final taskItems = [
+          for (final item in app.localTasks) (item.name, item.name),
+        ];
+        final taskValue = taskItems.any((item) => item.$1 == app.collectTask)
+            ? app.collectTask
+            : taskItems.isEmpty
+            ? ''
+            : taskItems.first.$1;
+        final persons = task?.persons ?? const <String>[];
+        final personItems = persons.isEmpty
+            ? [('', '请选择人员')]
+            : [for (final person in persons) (person, person)];
+        final personValue =
+            personItems.any((item) => item.$1 == app.collectPerson)
+            ? app.collectPerson
+            : personItems.first.$1;
+
         final items = <Widget>[
           const Text(
             '数据采集',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
           ),
           AppSelect<String>(
-            value: app.collectTask,
-            width: 260,
-            enabled: !app.recording,
-            items: [
-              ('', '全部任务'),
-              for (final item in app.localTasks) (item.name, item.name),
-            ],
-            onChanged: (value) => app.setCollectTask(value ?? ''),
+            value: taskValue,
+            width: 220,
+            enabled: !app.recording && taskItems.isNotEmpty,
+            items: taskItems,
+            onChanged: (value) => app.requestCollectTask(value ?? ''),
           ),
           AppSelect<String>(
-            value: app.collectPerson,
+            value: personValue,
             width: 150,
-            enabled: !app.recording && task != null,
-            items: [
-              ('', '请选择人员'),
-              for (final person in task?.persons ?? const <String>[])
-                (person, person),
-            ],
-            onChanged: (value) => app.setCollectPerson(value ?? ''),
+            enabled: !app.recording && persons.isNotEmpty,
+            items: personItems,
+            onChanged: (value) => app.requestCollectPerson(value ?? ''),
           ),
           AppButton(
             '采集说明',
@@ -82,11 +92,11 @@ class CollectScreen extends StatelessWidget {
                 ? Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(flex: 62, child: panels[0]),
+                      Expanded(flex: 50, child: panels[0]),
                       const SizedBox(width: 10),
-                      Expanded(flex: 130, child: panels[1]),
+                      Expanded(flex: 170, child: panels[1]),
                       const SizedBox(width: 10),
-                      Expanded(flex: 72, child: panels[2]),
+                      Expanded(flex: 60, child: panels[2]),
                     ],
                   )
                 : ListView(
@@ -139,24 +149,34 @@ class CollectScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (app.collectTask.isEmpty)
-                              Text(
-                                take.task,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: C.legendInk,
-                                ),
-                              ),
                             Text(
-                              '${take.time} · ${take.size}',
-                              style: const TextStyle(fontSize: 14),
+                              take.takeName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: C.legendInk,
+                              ),
                             ),
-                            const SizedBox(height: 4),
-                            Pill(
-                              take.valid ? '有效' : '无效',
-                              kind: take.valid ? PillKind.run : PillKind.fix,
+                            const SizedBox(height: 3),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${take.time} · ${take.size}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Pill(
+                                  take.valid ? '有效' : '无效',
+                                  kind: take.valid
+                                      ? PillKind.run
+                                      : PillKind.fix,
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -205,7 +225,18 @@ class CollectScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: CameraGrid(images: live?.images ?? const {}, fps: live?.fps),
+            child: CameraGrid(
+              images: live?.images ?? const {},
+              fps: live?.fps,
+              dead: live == null
+                  ? const {}
+                  : {
+                      for (final camera in CameraId.values)
+                        if (live.hasFrame(camera.channel) &&
+                            !live.isOnline(camera.channel))
+                          camera.channel,
+                    },
+            ),
           ),
           if (live?.error != null)
             Padding(

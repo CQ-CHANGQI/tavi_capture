@@ -8,7 +8,7 @@ import '../core/theme.dart';
 import '../ui/playbar.dart';
 import '../ui/replay_panel.dart';
 
-/// 查看数据：筛选 + 采集条列表 + 详情 + 内嵌回放。
+/// 查看数据：筛选 + 采集条列表 + 本条信息 / 回放三态 + 最大化。
 class ReviewScreen extends StatefulWidget {
   const ReviewScreen({super.key});
 
@@ -17,7 +17,6 @@ class ReviewScreen extends StatefulWidget {
 }
 
 class _ReviewScreenState extends State<ReviewScreen> {
-  bool _maximized = false;
   bool _detail = false;
 
   @override
@@ -45,14 +44,24 @@ class _ReviewScreenState extends State<ReviewScreen> {
         kind: BtnKind.ghost,
         height: 32,
         fontSize: 14,
-        onPressed: take == null ? null : app.libPrev,
+        onPressed: take == null
+            ? null
+            : () {
+                setState(() => _detail = true);
+                app.libPrev();
+              },
       ),
       AppButton(
         '下一条',
         kind: BtnKind.ghost,
         height: 32,
         fontSize: 14,
-        onPressed: take == null ? null : app.libNext,
+        onPressed: take == null
+            ? null
+            : () {
+                setState(() => _detail = true);
+                app.libNext();
+              },
       ),
       AppButton(
         _detail ? '关闭详情' : '详情',
@@ -64,13 +73,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
             : () => setState(() => _detail = !_detail),
       ),
       AppButton(
-        _maximized ? '还原' : '最大化',
+        '最大化',
         kind: BtnKind.ghost,
         height: 32,
         fontSize: 14,
-        onPressed: take == null
-            ? null
-            : () => setState(() => _maximized = !_maximized),
+        onPressed: take == null ? null : () => _openMaximized(context, app),
       ),
       AppButton(
         take?.valid == false ? '标记有效' : '标记无效',
@@ -82,7 +89,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
     ];
 
     final panel = take != null && _detail
-        ? _detailPanel(app, take, player, actions)
+        ? _TakeDetailPanel(
+            app: app,
+            take: take,
+            player: player,
+            actions: actions,
+            onPlay: () => setState(() => _detail = false),
+          )
         : ReplayPanel(
             player: player,
             duration: take?.duration ?? '00:00',
@@ -104,10 +117,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
           for (final item in app.localTasks) (item.name, item.name),
         ],
         onChanged: (value) {
-          setState(() {
-            _detail = false;
-            _maximized = false;
-          });
+          setState(() => _detail = false);
           app.setLibTask(value ?? '');
         },
       ),
@@ -116,10 +126,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
         width: 150,
         items: personItems,
         onChanged: (value) {
-          setState(() {
-            _detail = false;
-            _maximized = false;
-          });
+          setState(() => _detail = false);
           app.setLibPerson(value ?? '');
         },
       ),
@@ -127,10 +134,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
         labels: const ['全部', '有效', '无效'],
         index: app.libTab,
         onChanged: (value) {
-          setState(() {
-            _detail = false;
-            _maximized = false;
-          });
+          setState(() => _detail = false);
           app.setLibTab(value);
         },
         dense: true,
@@ -158,10 +162,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                       take: row,
                       selected: row == take,
                       onTap: () {
-                        setState(() {
-                          _detail = false;
-                          _maximized = false;
-                        });
+                        setState(() => _detail = true);
                         app.selectTake(row);
                       },
                     );
@@ -217,131 +218,244 @@ class _ReviewScreenState extends State<ReviewScreen> {
       },
     );
 
-    return Stack(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              header,
-              const SizedBox(height: 10),
-              Expanded(
-                child: wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(width: 320, child: list),
-                          const SizedBox(width: 10),
-                          Expanded(child: panel),
-                        ],
-                      )
-                    : ListView(
-                        children: [
-                          SizedBox(height: 560, child: panel),
-                          const SizedBox(height: 10),
-                          SizedBox(height: 300, child: list),
-                        ],
-                      ),
-              ),
-            ],
-          ),
-        ),
-        if (_maximized && take != null)
-          Positioned.fill(
-            child: ColoredBox(
-              color: C.bg,
-              child: Padding(padding: const EdgeInsets.all(14), child: panel),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _detailPanel(
-    AppState app,
-    TakeRecord take,
-    PlaybackController? player,
-    List<Widget> actions,
-  ) {
-    return Panel(
+    return Padding(
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final title = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      '回放 · ${take.duration}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Pill(
-                    take.valid ? '有效' : '无效',
-                    kind: take.valid ? PillKind.run : PillKind.fix,
-                  ),
-                ],
-              );
-              if (constraints.maxWidth < 760) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    title,
-                    const SizedBox(height: 6),
-                    Wrap(spacing: 8, runSpacing: 6, children: actions),
-                  ],
-                );
-              }
-              return Row(
-                children: [
-                  Expanded(child: title),
-                  Wrap(spacing: 8, runSpacing: 6, children: actions),
-                ],
-              );
-            },
-          ),
+          header,
           const SizedBox(height: 10),
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _InfoRow('任务名称', take.task),
-                  _InfoRow('文件名称', take.fileName),
-                  _InfoRow('采集时间', take.time),
-                  _InfoRow('采集人员', take.person),
-                  _InfoRow('机器人', take.robot),
-                  _InfoRow('存储地址', take.storagePath),
-                  _InfoRow('文件大小', take.size),
-                  _InfoRow('视频时长', take.duration),
-                  const SizedBox(height: 10),
-                  AppButton(
-                    '采集说明',
-                    kind: BtnKind.ghost,
-                    height: 38,
-                    onPressed: () => app.showBrief(take.task),
+            child: wide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(width: 320, child: list),
+                      const SizedBox(width: 10),
+                      Expanded(child: panel),
+                    ],
+                  )
+                : ListView(
+                    children: [
+                      SizedBox(height: 560, child: panel),
+                      const SizedBox(height: 10),
+                      SizedBox(height: 300, child: list),
+                    ],
                   ),
-                ],
-              ),
-            ),
           ),
-          if (player != null && !player.loading && player.error == null) ...[
-            const SizedBox(height: 8),
-            PlayBar(player: player),
-          ],
         ],
       ),
     );
   }
+
+  Future<void> _openMaximized(BuildContext context, AppState app) async {
+    if (app.libSelected == null) return;
+    app.telemetry.track('click_replay_max', {'action': 'maximize'});
+    var detail = _detail;
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setLocal) {
+          final currentApp = AppScope.of(context);
+          final take = currentApp.libSelected;
+          final player = currentApp.playback;
+          final actions = <Widget>[
+            AppButton(
+              '上一条',
+              kind: BtnKind.ghost,
+              height: 30,
+              fontSize: 13,
+              onPressed: take == null
+                  ? null
+                  : () {
+                      setLocal(() => detail = true);
+                      currentApp.libPrev();
+                    },
+            ),
+            AppButton(
+              '下一条',
+              kind: BtnKind.ghost,
+              height: 30,
+              fontSize: 13,
+              onPressed: take == null
+                  ? null
+                  : () {
+                      setLocal(() => detail = true);
+                      currentApp.libNext();
+                    },
+            ),
+            AppButton(
+              detail ? '关闭详情' : '详情',
+              kind: BtnKind.ghost,
+              height: 30,
+              fontSize: 13,
+              onPressed: take == null
+                  ? null
+                  : () => setLocal(() => detail = !detail),
+            ),
+            AppButton(
+              '还原',
+              kind: BtnKind.ghost,
+              height: 30,
+              fontSize: 13,
+              onPressed: () {
+                currentApp.telemetry.track('click_replay_max', {
+                  'action': 'restore',
+                });
+                Navigator.pop(dialogContext);
+              },
+            ),
+            AppButton(
+              take?.valid == false ? '标记有效' : '标记无效',
+              kind: take?.valid == false ? BtnKind.ok : BtnKind.bad,
+              height: 30,
+              fontSize: 13,
+              onPressed: take == null
+                  ? null
+                  : () {
+                      currentApp.toggleValid(take);
+                      setLocal(() {});
+                    },
+            ),
+          ];
+          final Widget content = take == null
+              ? ReplayPanel(
+                  player: null,
+                  duration: '00:00',
+                  valid: true,
+                  actions: actions,
+                )
+              : detail
+              ? _TakeDetailPanel(
+                  app: currentApp,
+                  take: take,
+                  player: player,
+                  actions: actions,
+                  onPlay: () => setLocal(() => detail = false),
+                )
+              : ReplayPanel(
+                  player: player,
+                  duration: take.duration,
+                  valid: take.valid,
+                  actions: actions,
+                  onRetry: currentApp.retryPlayback,
+                  maximized: true,
+                );
+          return Dialog.fullscreen(
+            backgroundColor: C.bg,
+            child: Padding(padding: const EdgeInsets.all(14), child: content),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 本条信息面板：详情和最大化共用。
+class _TakeDetailPanel extends StatelessWidget {
+  const _TakeDetailPanel({
+    required this.app,
+    required this.take,
+    required this.player,
+    required this.actions,
+    this.onPlay,
+  });
+
+  final AppState app;
+  final TakeRecord take;
+  final PlaybackController? player;
+  final List<Widget> actions;
+  final VoidCallback? onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = player;
+    if (current == null) return _build(context);
+    return ListenableBuilder(
+      listenable: current,
+      builder: (context, _) => _build(context),
+    );
+  }
+
+  Widget _build(BuildContext context) => Panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final title = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    '回放 · ${take.duration}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Pill(
+                  take.valid ? '有效' : '无效',
+                  kind: take.valid ? PillKind.run : PillKind.fix,
+                ),
+              ],
+            );
+            if (constraints.maxWidth < 760) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 8, runSpacing: 6, children: actions),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: title),
+                Wrap(spacing: 8, runSpacing: 6, children: actions),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _InfoRow('采集时间', take.time),
+                _InfoRow('采集文件名称', take.fileName),
+                _InfoRow('任务名称', take.task),
+                _InfoRow('采集人员', take.person),
+                _InfoRow('机器人', take.robot),
+                _InfoRow('存储地址', take.storagePath),
+                _InfoRow('文件大小', take.size),
+                _InfoRow('视频时长', take.duration),
+                const SizedBox(height: 10),
+                AppButton(
+                  '采集说明',
+                  kind: BtnKind.ghost,
+                  height: 38,
+                  onPressed: () => app.showBrief(take.task),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (player == null)
+          const EmptyPlayBar()
+        else
+          PlayBar(player: player!, onPlay: onPlay),
+      ],
+    ),
+  );
 }
 
 class _InfoRow extends StatelessWidget {
@@ -360,7 +474,7 @@ class _InfoRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 90,
+          width: 100,
           child: Text(
             label,
             style: const TextStyle(fontSize: 14, color: C.muted),
@@ -405,11 +519,11 @@ class _ReviewRow extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                take.task,
+                take.takeName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),

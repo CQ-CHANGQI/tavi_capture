@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -27,6 +29,7 @@ class _TaviAppState extends State<TaviApp> {
     _ownsState = widget.state == null;
     _state = widget.state ?? AppState();
     _router = createRouter(_state);
+    if (_ownsState) unawaited(_state.init());
   }
 
   @override

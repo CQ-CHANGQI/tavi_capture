@@ -25,8 +25,18 @@ const _jointColors = [
   0xffc47a3b,
 ];
 
-const _armLabels = ['肩俯仰', '肩滚转', '肩偏航', '肘俯仰', '腕俯仰', '腕滚转', '腕偏航'];
-const _bodyLabels = ['腰俯仰', '腰滚转', '腰偏航', '升降'];
+const _stateColors = [
+  0xff8fb8e0,
+  0xff7fcfa0,
+  0xffe5c07b,
+  0xffb3a5f5,
+  0xfff08a80,
+  0xff8ed7e0,
+  0xffe0a878,
+];
+
+const _armLabels = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6', 'J7', 'J8'];
+const _bodyLabels = ['J1', 'J2', 'J3', 'J4'];
 
 /// 一条画在图上的关节曲线。
 class JointCurve {
@@ -39,9 +49,8 @@ class JointCurve {
 
 /// 一个机械臂分组（左/右/身体）的指令与状态历史。
 class JointTrack {
-  JointTrack(this.group);
+  JointTrack();
 
-  final JointGroup group;
   final Map<String, List<double>> command = {};
   final Map<String, List<double>> state = {};
   final List<String> _order = [];
@@ -73,19 +82,42 @@ class JointTrack {
   }
 
   List<JointCurve> curves(JointMode mode) {
-    var source = switch (mode) {
-      JointMode.command => command,
-      JointMode.state => state,
-      JointMode.all => command.isEmpty ? state : command,
-    };
-    if (source.isEmpty) source = state;
+    switch (mode) {
+      case JointMode.command:
+        {
+          final commands = _curvesOf(command);
+          return commands.isEmpty ? _curvesOf(state) : commands;
+        }
+      case JointMode.state:
+        {
+          final states = _curvesOf(state);
+          return states.isEmpty ? _curvesOf(command) : states;
+        }
+      case JointMode.all:
+        {
+          final commands = _curvesOf(command, suffix: '指令');
+          final states = _curvesOf(state, suffix: '状态', colors: _stateColors);
+          if (commands.isEmpty) return states;
+          if (states.isEmpty) return commands;
+          return [...commands, ...states];
+        }
+    }
+  }
+
+  List<JointCurve> _curvesOf(
+    Map<String, List<double>> source, {
+    String? suffix,
+    List<int> colors = _jointColors,
+  }) {
     final names = _order.where(source.containsKey).toList();
     return [
       for (var i = 0; i < names.length; i++)
         JointCurve(
-          _labelFor(names[i], i),
+          suffix == null
+              ? _labelFor(names[i], i)
+              : '${_labelFor(names[i], i)} · $suffix',
           source[names[i]]!,
-          _jointColors[i % _jointColors.length],
+          colors[i % colors.length],
         ),
     ];
   }
@@ -119,7 +151,7 @@ class PlaybackController extends ChangeNotifier {
   final Map<String, bool> _pendingCompressed = {};
   final Set<String> _decoding = {};
   final Map<JointGroup, JointTrack> tracks = {
-    for (final group in JointGroup.values) group: JointTrack(group),
+    for (final group in JointGroup.values) group: JointTrack(),
   };
 
   bool loading = true;
@@ -132,8 +164,12 @@ class PlaybackController extends ChangeNotifier {
   int endNs = 0;
 
   int _generation = 0;
+  int? _primeToken;
   bool _disposed = false;
   DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 首帧预热/seek 预热期间不算 loading，但播放键要禁用。
+  bool get busy => loading || _primeToken != null;
 
   Duration get duration =>
       Duration(microseconds: (endNs - startNs).clamp(0, 1 << 62) ~/ 1000);
@@ -163,9 +199,15 @@ class PlaybackController extends ChangeNotifier {
         throw McapException('这个 MCAP 里没有图像或关节话题');
       }
       _cursor = _newCursor(positionNs);
+      _primeToken = _generation;
+      try {
+        await _prime(_primeToken!);
+      } finally {
+        if (_primeToken == _generation) _primeToken = null;
+      }
+      if (_disposed) return;
       loading = false;
       notifyListeners();
-      await _prime();
     } catch (e) {
       if (_disposed) return;
       loading = false;
@@ -263,7 +305,7 @@ class PlaybackController extends ChangeNotifier {
   );
 
   void play() {
-    if (_disposed || loading || error != null || playing) return;
+    if (_disposed || busy || error != null || playing) return;
     if (positionNs >= endNs) {
       unawaited(seekTo(startNs, resume: true));
       return;
@@ -302,9 +344,15 @@ class PlaybackController extends ChangeNotifier {
     positionNs = target.clamp(startNs, endNs);
     _clearMedia();
     _cursor = _newCursor(positionNs);
+    _primeToken = token;
     notifyListeners();
-    await _prime();
+    try {
+      await _prime(token);
+    } finally {
+      if (_primeToken == token) _primeToken = null;
+    }
     if (_disposed || token != _generation) return;
+    notifyListeners();
     if (wasPlaying && positionNs < endNs) play();
   }
 
@@ -319,22 +367,22 @@ class PlaybackController extends ChangeNotifier {
   Future<void> stepFrame(int direction) =>
       seekTo(positionNs + (direction < 0 ? -1 : 1) * 33333333);
 
-  Future<void> _prime() async {
+  Future<void> _prime(int token) async {
     final cursor = _cursor;
     if (cursor == null) return;
     final until = positionNs + 400000000;
     try {
       for (var i = 0; i < 240; i++) {
         final message = await cursor.next();
+        if (_disposed || token != _generation) return;
         if (message == null) break;
         if (message.logTimeNs > until) break;
         _apply(message);
       }
     } catch (e) {
-      _fail(e);
+      if (!_disposed && token == _generation) _fail(e);
       return;
     }
-    if (!_disposed) notifyListeners();
   }
 
   Future<void> _run(int generation) async {
@@ -504,6 +552,9 @@ class PlaybackController extends ChangeNotifier {
   }
 
   void _clearMedia() {
+    for (final track in tracks.values) {
+      track.clear();
+    }
     final old = cameras.values.toList();
     cameras.clear();
     if (old.isEmpty) return;
@@ -517,9 +568,6 @@ class PlaybackController extends ChangeNotifier {
           image.dispose();
         }
       });
-    }
-    for (final track in tracks.values) {
-      track.clear();
     }
   }
 

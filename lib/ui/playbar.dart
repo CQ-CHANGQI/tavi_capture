@@ -5,9 +5,12 @@ import '../core/theme.dart';
 
 /// 回放控制条：±5 秒、逐帧、播放/暂停、进度、倍速、循环。
 class PlayBar extends StatefulWidget {
-  const PlayBar({super.key, required this.player});
+  const PlayBar({super.key, required this.player, this.onPlay});
 
   final PlaybackController player;
+
+  /// 在详情态点播放时，切回放面板。
+  final VoidCallback? onPlay;
 
   @override
   State<PlayBar> createState() => _PlayBarState();
@@ -19,7 +22,7 @@ class _PlayBarState extends State<PlayBar> {
   @override
   Widget build(BuildContext context) {
     final player = widget.player;
-    final disabled = player.loading || player.error != null;
+    final disabled = player.busy || player.error != null;
     final track = _Track(
       value: _drag ?? player.progress,
       onStart: disabled ? null : (ratio) => setState(() => _drag = ratio),
@@ -50,7 +53,12 @@ class _PlayBarState extends State<PlayBar> {
           kind: BtnKind.primary,
           height: 40,
           minWidth: 72,
-          onPressed: disabled ? null : player.toggle,
+          onPressed: disabled
+              ? null
+              : () {
+                  if (!player.playing) widget.onPlay?.call();
+                  player.toggle();
+                },
         ),
         _icon(
           Icons.skip_next,
@@ -210,4 +218,113 @@ class _Track extends StatelessWidget {
       );
     },
   );
+}
+
+/// 空状态下的禁用播放条：和 PRD 的「未选中仍显示播放条」一致。
+class EmptyPlayBar extends StatelessWidget {
+  const EmptyPlayBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final track = const SizedBox(
+      height: 24,
+      child: Center(child: ProgressBar(value: 0, height: 10)),
+    );
+    final controls = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          onPressed: null,
+          color: C.ink,
+          iconSize: 22,
+          icon: const Icon(Icons.replay_5),
+        ),
+        IconButton(
+          onPressed: null,
+          color: C.ink,
+          iconSize: 22,
+          icon: const Icon(Icons.skip_previous),
+        ),
+        const AppButton(
+          '播放',
+          kind: BtnKind.primary,
+          height: 40,
+          minWidth: 72,
+          onPressed: null,
+        ),
+        IconButton(
+          onPressed: null,
+          color: C.ink,
+          iconSize: 22,
+          icon: const Icon(Icons.skip_next),
+        ),
+        IconButton(
+          onPressed: null,
+          color: C.ink,
+          iconSize: 22,
+          icon: const Icon(Icons.forward_5),
+        ),
+      ],
+    );
+    final trailer = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text(
+          '00:00 / 00:00',
+          style: TextStyle(
+            fontSize: 16,
+            color: C.ink,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(width: 8),
+        const AppButton(
+          '1x',
+          kind: BtnKind.ghost,
+          height: 36,
+          minWidth: 52,
+          fontSize: 15,
+          onPressed: null,
+        ),
+        IconButton(
+          onPressed: null,
+          color: C.muted,
+          icon: const Icon(Icons.repeat),
+        ),
+      ],
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: C.panel,
+        border: Border.all(color: C.line),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 760) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                track,
+                const SizedBox(height: 2),
+                FittedBox(fit: BoxFit.scaleDown, child: controls),
+                const SizedBox(height: 2),
+                FittedBox(fit: BoxFit.scaleDown, child: trailer),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              controls,
+              const SizedBox(width: 12),
+              Expanded(child: track),
+              const SizedBox(width: 12),
+              trailer,
+            ],
+          );
+        },
+      ),
+    );
+  }
 }

@@ -1,6 +1,6 @@
 # 离线视频（MCAP 回放）设计与实现
 
-离线视频就是“查看数据 / 回看”这块，播的是机器人工控上录的 `.mcap` 包，不是本地文件，也不是 LCM 实时流。
+离线视频就是“查看数据”里的回放，播的是机器人工控上录的 `.mcap` 包，不是本地文件，也不是 LCM 实时流。
 
 这条链路和 LCM 是**完全独立**的：LCM 走 UDP 组播、只保留最新帧；离线回放走 HTTP Range、有时间轴、能暂停/快进/拖进度条/看关节曲线。两边的代码唯一的交集是 `CameraGrid` 和关节图组件。
 
@@ -151,7 +151,7 @@ header + count + (name, value)[]
 6. `play()` 跑 `_run()`：读下一条消息，按 `log_time` 和墙钟等到该显示的时刻，`_apply()`。
 7. 图像走 latest-wins 解码；关节追加到 `JointTrack`。
 8. UI 的 `PlayBar` 负责播放/暂停、±5 秒、逐帧、倍速、循环、拖拽。
-9. 画面和关节图在 `ReplayPanel` 里，库和回看页共用。
+9. 画面和关节图在 `ReplayPanel` 里，由查看数据页使用。
 
 ### 通道怎么对到四个画面
 
@@ -203,15 +203,16 @@ Seek：
 - 每帧按名字追加到 `JointTrack` 的 `state` / `command`；
 - 每条曲线最多留 600 个点，图上只画最近 240 个；
 - 左臂/右臂/身体三组，图例按位置映射成“肩俯仰/肩滚转/…”这类中文名；
-- 模式有“指令 / 状态 / 全部”，没有 command 数据时退回 state，避免空图。
+- 模式有“指令 / 状态 / 全部”；“全部”同时画 command 和 state，某一类为空时退回另一类。
 
-通知节流到 33ms，解码/关节更新不会把 UI 刷爆。
+通知节流到 33ms；`ReplayPanel` 局部监听 `PlaybackController`，不会每帧重建整个查看数据页。
 
 ## 7. UI 这块
 
 - “查看数据”左侧是采集条列表，支持任务/人员/有效性筛选、分页；右侧是回放面板。
 - 回放面板：四路相机 + 三组关节图 + 播放条；可以最大化，相机可以双击全屏。
-- “回看”页复用同一个 `ReplayPanel`，底下是标记无效/返回列表。
+- 最大化用全屏弹层：顶栏和任务列表隐藏，相机 2×2 在上、三组关节纵排在下，整块可滚动；相机全屏底部保留播放条。
+- 查看数据页的详情面板显示采集条字段；播放中进入详情不暂停，详情里保留播放条。
 - `PlayBar`：后退 5 秒、逐帧后退、播放/暂停、逐帧前进、前进 5 秒、进度条、时间、倍速、循环。
 
 一个现状：所有采集条都共用 `defaultMcapUrl(savedIp)`（或 `--dart-define=MCAP_URL`），所以点哪条播的都是同一个包；`TakeRecord` 没有 `sourceUrl` 字段。接后端后要按记录存地址，这是已知的临时行为。
@@ -275,8 +276,9 @@ dart run tool/mcap_check.dart http://<host>:8090/<file>.mcap
 ## 11. 测试
 
 - `test/mcap_codecs_test.dart`：Statistics、JointState、bgr8 Image 的 CDR 解码。
+- `test/playback_test.dart`：关节“全部”模式同时包含指令和状态。
+- `test/replay_panel_test.dart`：回放失败时显示错误和“重试”。
 - 真包手测：1.7GB 的 `train_data_1_0.mcap`，打开、播放、seek、关节曲线。
-- UI 冒烟：回放失败时显示错误和“重试”，不崩。
 - `tool/mcap_check.dart`：命令行验包。
 
 缺口也说一下：MCAP reader/chunk cursor 目前没有合成文件的单测，都是靠真包和 codec 测试；后面可以造一个小的 MCAP 跑 CI。

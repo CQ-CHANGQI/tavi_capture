@@ -38,12 +38,9 @@ class LivePreview extends ChangeNotifier {
   final Set<String> _decoding = {};
 
   List<JointBatch>? joints;
-  DateTime? jointsAt;
   bool running = false;
   String? error;
   bool _disposed = false;
-
-  LcmStats get stats => _receiver?.stats ?? LcmStats();
 
   /// 已解码并参与显示的帧率。
   double fps(String camera) {
@@ -58,13 +55,11 @@ class LivePreview extends ChangeNotifier {
     return at != null && DateTime.now().difference(at).inSeconds < 2;
   }
 
+  /// 是否至少收到过一帧。用来区分“还没开始”和“曾经有画面后掉线”。
+  bool hasFrame(String camera) => lastFrame.containsKey(camera);
+
   bool get allCamerasOnline =>
       CameraId.values.every((c) => isOnline(c.channel));
-
-  bool get jointsOnline {
-    final at = jointsAt;
-    return at != null && DateTime.now().difference(at).inSeconds < 2;
-  }
 
   Future<void> start() async {
     if (_disposed || running) return;
@@ -95,6 +90,7 @@ class LivePreview extends ChangeNotifier {
     _clearImages();
     lastFrame.clear();
     _arrivals.clear();
+    joints = null;
     if (!_disposed) notifyListeners();
   }
 
@@ -108,9 +104,8 @@ class LivePreview extends ChangeNotifier {
 
   void _onJoints(List<JointBatch> batches) {
     if (_disposed || batches.isEmpty) return;
+    // 实时关节当前没有 UI 消费，只更新数据不通知，避免相机面板跟着重建。
     joints = batches;
-    jointsAt = DateTime.now();
-    notifyListeners();
   }
 
   Future<void> _decode(String camera) async {

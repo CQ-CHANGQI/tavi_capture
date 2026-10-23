@@ -61,6 +61,12 @@ class LcmStats {
         ? list.whereType<String>().toList(growable: false)
         : const [];
   }
+
+  @override
+  String toString() =>
+      'LcmStats(datagrams: $datagrams, messages: $messages, '
+      'parseErrors: $parseErrors, dropped: $dropped, incomplete: $incomplete, '
+      'corrupt: $corrupt, pending: $pending, interfaces: $interfaces)';
 }
 
 /// 相机和关节的接收端：socket、组播、分片重组、解码都在一个独立 isolate 里，
