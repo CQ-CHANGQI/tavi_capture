@@ -123,7 +123,7 @@ double  command_values[10][128]
 
 一包可能有多帧（num_frames > 1），全部解出来按顺序发给 UI。
 
-关节包有两种到法：裸的 `joint_batch_t` 直接发，或者用 `preview_package_t` 包一层（机器人 joint bridge 是后者）。两条路都支持：先试 preview 分片，解不出来再按裸包解。
+关节包有两种到法：裸的 `joint_batch_t` 直接发，或者用 `preview_package_t` 包一层（机器人 joint bridge 是后者）。两条路都支持：先试 preview 分片；识别成合法分片但还没收齐时直接等下一片/丢弃，不会改按裸包解；识别不出分片才按裸包解。
 
 ## 6. 组播接收
 
@@ -143,7 +143,7 @@ socket 可读时一次最多连收 512 个数据报，然后主动让出去。�
 
 ### 平台权限
 
-- Android 要 `CHANGE_WIFI_MULTICAST_STATE`，并在采集期间持有 `MulticastLock`（MethodChannel `tavi/multicast`），不然息屏/后台就被系统过滤。
+- Android 要 `CHANGE_WIFI_MULTICAST_STATE`，并在实时预览启动后持有 `MulticastLock`（MethodChannel `tavi/multicast`），不然息屏/后台就被系统过滤。当前连接成功就启动实时预览，离开采集页不会停，锁会一直持有到 App 退出。
 - iOS 要 Apple 的 `com.apple.developer.networking.multicast` entitlement。我们现在没放，所以 **iOS 目前收不到组播**，这个不是代码问题，是权限没申请。
 - macOS 沙箱里 `network.client/server` 都有，实测能收。
 - Windows 放行 UDP 7667/7668 入站，专用网络。

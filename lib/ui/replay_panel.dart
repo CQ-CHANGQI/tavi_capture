@@ -92,7 +92,7 @@ class ReplayPanel extends StatelessWidget {
     if (player == null) {
       return const Center(
         child: Text(
-          '选择一条采集条回看',
+          '请先选择左侧一条数据查看',
           style: TextStyle(fontSize: 14, color: C.muted),
         ),
       );

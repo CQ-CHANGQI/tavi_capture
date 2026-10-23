@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/app_state.dart';
 import '../core/models.dart';
 import '../core/scope.dart';
 import '../core/theme.dart';
+import '../router/app_routes.dart';
 
-/// 所有弹层：登录、采集说明、设置、手动控制、异常恢复、加载中。
+/// 设置、采集说明、异常恢复、加载中。
 class ModalHost extends StatelessWidget {
-  const ModalHost({super.key});
+  const ModalHost({super.key, required this.location});
+
+  final String location;
 
   @override
   Widget build(BuildContext context) {
@@ -15,10 +19,8 @@ class ModalHost extends StatelessWidget {
     final modal = app.modal;
     if (modal == null) return const SizedBox.shrink();
     final child = switch (modal) {
-      ModalKind.login => const LoginModal(),
       ModalKind.brief => const BriefModal(),
-      ModalKind.settings => const SettingsModal(),
-      ModalKind.move => const MoveModal(),
+      ModalKind.settings => SettingsModal(readOnly: app.recording),
       ModalKind.recover => const RecoverModal(),
       ModalKind.loading => const LoadingModal(),
     };
@@ -72,188 +74,6 @@ Widget _closeButton(AppState app) => AppButton(
 );
 
 // ---------------------------------------------------------------------------
-// 登录
-// ---------------------------------------------------------------------------
-
-class LoginModal extends StatefulWidget {
-  const LoginModal({super.key});
-
-  @override
-  State<LoginModal> createState() => _LoginModalState();
-}
-
-class _LoginModalState extends State<LoginModal> {
-  final _user = TextEditingController();
-  final _password = TextEditingController();
-  final _localPassword = TextEditingController();
-  bool _local = false;
-  Role _role = Role.operator;
-  String _error = '';
-
-  @override
-  void dispose() {
-    _user.dispose();
-    _password.dispose();
-    _localPassword.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final app = AppScope.of(context);
-    final useLocal = !app.online || _local;
-    return _Dialog(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Text(
-                app.loggedIn
-                    ? (useLocal ? '切换本地人员' : '切换账号')
-                    : (useLocal ? '本地登录' : '云端登录'),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              _closeButton(app),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Hint(
-            app.online
-                ? (useLocal
-                      ? '选择角色并输入本地密码登录。读取本机已缓存任务，不访问云端。'
-                      : '有网：用云端账号和密码登录。登录后拉取该账号任务并落地到平板。')
-                : '现场没网：选择角色并输入本地密码登录。读取本机已缓存任务。',
-          ),
-          if (app.online) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                AppButton(
-                  '云端登录',
-                  kind: useLocal ? BtnKind.ghost : BtnKind.primary,
-                  onPressed: () => setState(() {
-                    _local = false;
-                    _error = '';
-                  }),
-                ),
-                const SizedBox(width: 8),
-                AppButton(
-                  '本地登录',
-                  kind: useLocal ? BtnKind.primary : BtnKind.ghost,
-                  onPressed: () => setState(() {
-                    _local = true;
-                    _error = '';
-                  }),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 8),
-          if (!useLocal) _cloudForm(app) else _localForm(app),
-        ],
-      ),
-    );
-  }
-
-  Widget _cloudForm(AppState app) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const _Label('账号'),
-      TextField(
-        controller: _user,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: '云端账号'),
-      ),
-      const _Label('密码'),
-      TextField(
-        controller: _password,
-        obscureText: true,
-        decoration: const InputDecoration(hintText: '密码'),
-        onSubmitted: (_) => _submitCloud(app),
-      ),
-      _ErrorText(_error),
-      AppButton(
-        '登录',
-        block: true,
-        height: 44,
-        onPressed: () => _submitCloud(app),
-      ),
-      const SizedBox(height: 10),
-      const Hint(
-        '原型：张三 / 1234 为工程师，可看本机数据；李四 / 1234 为采集员，只看自己的任务。账号由云端开，本端不能注册。',
-        size: 14,
-      ),
-    ],
-  );
-
-  Widget _localForm(AppState app) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const _Label('角色'),
-      Row(
-        children: [
-          _roleChip(Role.engineer),
-          const SizedBox(width: 18),
-          _roleChip(Role.operator),
-        ],
-      ),
-      const _Label('密码'),
-      TextField(
-        controller: _localPassword,
-        obscureText: true,
-        decoration: const InputDecoration(hintText: '本地登录密码'),
-        onSubmitted: (_) => _submitLocal(app),
-      ),
-      _ErrorText(_error),
-      AppButton(
-        '登录',
-        block: true,
-        height: 44,
-        onPressed: () => _submitLocal(app),
-      ),
-      const SizedBox(height: 10),
-      const Hint('原型：工程师 weiyi1234 / 采集员 weiyi2018（密码后台写死）', size: 14),
-    ],
-  );
-
-  Widget _roleChip(Role value) => InkWell(
-    onTap: () => setState(() => _role = value),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          _role == value ? Icons.radio_button_checked : Icons.radio_button_off,
-          size: 20,
-          color: _role == value ? C.brand : C.muted,
-        ),
-        const SizedBox(width: 6),
-        Text(value.label, style: const TextStyle(fontSize: 16)),
-      ],
-    ),
-  );
-
-  void _submitCloud(AppState app) {
-    final error = app.cloudLogin(_user.text.trim(), _password.text);
-    if (!mounted) return;
-    if (error != null) setState(() => _error = error);
-  }
-
-  void _submitLocal(AppState app) {
-    final error = app.localLogin(_role, _localPassword.text);
-    if (!mounted) return;
-    if (error != null) setState(() => _error = error);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // 采集说明
 // ---------------------------------------------------------------------------
 
@@ -263,7 +83,7 @@ class BriefModal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final task = app.briefTask.isEmpty ? app.dataFilter : app.briefTask;
+    final task = app.briefTask;
     return _Dialog(
       width: 720,
       child: Column(
@@ -311,7 +131,9 @@ class BriefModal extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class SettingsModal extends StatefulWidget {
-  const SettingsModal({super.key});
+  const SettingsModal({super.key, required this.readOnly});
+
+  final bool readOnly;
 
   @override
   State<SettingsModal> createState() => _SettingsModalState();
@@ -324,7 +146,7 @@ class _SettingsModalState extends State<SettingsModal> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _ip ??= AppScope.of(context).savedIp;
+    _ip ??= AppScope.of(context).configuredIp;
   }
 
   @override
@@ -425,18 +247,17 @@ class _SettingsModalState extends State<SettingsModal> {
   };
 
   Widget _basic(AppState app) {
-    final readOnly = app.readOnlySettings;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         const SectionTitle('机器人 IP'),
         const SizedBox(height: 4),
-        const Hint('打开 App 会按这个地址自动连接。改完保存即重新连接。'),
+        const Hint('修改后只保存到配置，下次启动生效。当前连接不变。'),
         const SizedBox(height: 8),
         IpSegments(
-          initialIp: _ip ?? app.savedIp,
-          enabled: !readOnly,
+          initialIp: _ip ?? app.configuredIp,
+          enabled: !widget.readOnly,
           onChanged: (value) => _ip = value,
         ),
         const SizedBox(height: 12),
@@ -444,22 +265,20 @@ class _SettingsModalState extends State<SettingsModal> {
           children: [
             Expanded(
               child: Hint(
-                readOnly
-                    ? '采集和查看数据页面中不能修改连接。'
-                    : '开机自动打开 App、自动连接上次机器人、没网读本地任务。采集中不能改 IP。',
+                widget.readOnly ? '采集中不能修改 IP。' : '当前连接的 IP 不会因为保存而改变。',
               ),
             ),
             const SizedBox(width: 12),
             AppButton(
-              '保存并连接',
+              '保存',
               kind: BtnKind.ok,
               height: 44,
-              onPressed: readOnly
+              onPressed: widget.readOnly
                   ? null
                   : () {
-                      final ip = _ip ?? app.savedIp;
-                      app.closeModal();
-                      app.connect(ip);
+                      if (app.saveIp(_ip ?? app.configuredIp)) {
+                        app.closeModal();
+                      }
                     },
             ),
           ],
@@ -470,7 +289,6 @@ class _SettingsModalState extends State<SettingsModal> {
 
   Widget _processes(AppState app) {
     final selected = app.services[app.selectedProc];
-    final readOnly = app.readOnlySettings;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -534,9 +352,7 @@ class _SettingsModalState extends State<SettingsModal> {
                     kind: BtnKind.ghost,
                     height: 32,
                     fontSize: 14,
-                    onPressed: readOnly || selected.running
-                        ? null
-                        : app.startProc,
+                    onPressed: selected.running ? null : app.startProc,
                   ),
                   const SizedBox(width: 6),
                   AppButton(
@@ -544,9 +360,7 @@ class _SettingsModalState extends State<SettingsModal> {
                     kind: BtnKind.ghost,
                     height: 32,
                     fontSize: 14,
-                    onPressed: readOnly || !selected.running
-                        ? null
-                        : app.stopProc,
+                    onPressed: selected.running ? app.stopProc : null,
                   ),
                   const SizedBox(width: 6),
                   AppButton(
@@ -554,7 +368,7 @@ class _SettingsModalState extends State<SettingsModal> {
                     kind: BtnKind.ghost,
                     height: 32,
                     fontSize: 14,
-                    onPressed: readOnly ? null : app.restartProc,
+                    onPressed: app.restartProc,
                   ),
                 ],
               ),
@@ -573,14 +387,11 @@ class _SettingsModalState extends State<SettingsModal> {
     children: [
       Row(
         children: [
-          AppSelect<String>(
-            value: app.logType,
-            width: 180,
-            items: [for (final key in AppState.logTypes.keys) (key, key)],
-            onChanged: (value) =>
-                setState(() => app.logType = value ?? app.logType),
+          const Text(
+            '操作日志',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           AppSelect<String>(
             value: app.logRange,
             width: 180,
@@ -597,8 +408,7 @@ class _SettingsModalState extends State<SettingsModal> {
           AppButton(
             '下载',
             kind: BtnKind.ghost,
-            onPressed: () =>
-                app.toast('已下载「${app.logType}」日志（${app.logRows.length} 条）'),
+            onPressed: () => app.toast('已下载操作日志（${app.logRows.length} 条）'),
           ),
         ],
       ),
@@ -609,38 +419,36 @@ class _SettingsModalState extends State<SettingsModal> {
 
   Widget _devices(AppState app) {
     final rows = <(String, bool, String)>[
-      ('机器人（工控）', app.robotOk, app.robotOk ? '已连接' : '未连接'),
-      ('双臂服务', app.armOk, app.armOk ? '已上电 · 就绪' : '未启动'),
-      ('夹爪', app.gripperOk, app.gripperOk ? '就绪' : '未连接'),
-      ('底盘服务', app.baseOk, app.baseOk ? '就绪' : '未启动'),
-      ('VR', app.vrOk, app.vrOk ? '在线' : '未连接'),
+      ('双臂', app.armOk, app.armOk ? '已上电' : '未上电'),
+      ('夹爪', app.gripperOk, app.gripperOk ? '已上电' : '未上电'),
+      ('底盘', app.baseOk, app.baseOk ? '已上电' : '未上电'),
       (
         '主视角相机',
         app.live?.isOnline('cam_head') ?? false,
-        app.live?.isOnline('cam_head') ?? false ? '正常' : '未连接',
+        app.live?.isOnline('cam_head') ?? false ? '已上电' : '未上电',
       ),
       (
         '左腕相机',
         app.live?.isOnline('cam_left') ?? false,
-        app.live?.isOnline('cam_left') ?? false ? '正常' : '未连接',
+        app.live?.isOnline('cam_left') ?? false ? '已上电' : '未上电',
       ),
       (
         '右腕相机',
         app.live?.isOnline('cam_right') ?? false,
-        app.live?.isOnline('cam_right') ?? false ? '正常' : '未连接',
+        app.live?.isOnline('cam_right') ?? false ? '已上电' : '未上电',
       ),
       (
         '全景相机',
         app.live?.isOnline('cam_chest') ?? false,
-        app.live?.isOnline('cam_chest') ?? false ? '正常' : '未连接',
+        app.live?.isOnline('cam_chest') ?? false ? '已上电' : '未上电',
       ),
-      ('机载存储', app.storageOk, app.storageText),
+      ('机载存储', true, app.storageText),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Hint('各设备与服务的当前状态。待机时服务已停止，进入采集或手动控制时自动启动。'),
+        const Hint('硬件上电状态。服务是否运行看“进程管理”；进入采集或手动模式会自动启动服务。'),
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -733,262 +541,6 @@ class _SettingsModalState extends State<SettingsModal> {
 }
 
 // ---------------------------------------------------------------------------
-// 手动控制
-// ---------------------------------------------------------------------------
-
-class MoveModal extends StatefulWidget {
-  const MoveModal({super.key});
-
-  @override
-  State<MoveModal> createState() => _MoveModalState();
-}
-
-class _MoveModalState extends State<MoveModal> {
-  String _message = '按住方向按钮移动，松开停止。';
-  int _speed = 50;
-
-  @override
-  Widget build(BuildContext context) {
-    final app = AppScope.of(context);
-    final ready = app.baseOk && app.armOk;
-    return _Dialog(
-      width: 1000,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Text(
-                '手动控制',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              AppButton(
-                '完成',
-                kind: BtnKind.ghost,
-                height: 36,
-                onPressed: app.closeModal,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Expanded(child: Hint('连接底盘和双臂后才能控制。')),
-              AppButton(
-                '一键连接',
-                kind: BtnKind.primary,
-                height: 46,
-                minWidth: 160,
-                onPressed: app.connectAll,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final narrow = constraints.maxWidth < 720;
-              final left = _zone(
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      '双臂服务',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: C.legendInk,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    AppButton(
-                      '回 home 点',
-                      kind: BtnKind.ghost,
-                      onPressed: ready ? app.cycleHome : null,
-                    ),
-                  ],
-                ),
-              );
-              final right = _zone(_chassis(context, app, ready, narrow));
-              if (narrow) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [left, const SizedBox(height: 12), right],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 65, child: left),
-                  const SizedBox(width: 16),
-                  Expanded(flex: 135, child: right),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _zone(Widget child) => Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: C.input,
-      border: Border.all(color: C.line),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: child,
-  );
-
-  bool _ready = false;
-
-  Widget _chassis(BuildContext context, AppState app, bool ready, bool narrow) {
-    _ready = ready;
-    return Column(
-      children: [
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            '底盘控制',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: C.legendInk,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            const gap = 12.0;
-            final size = ((constraints.maxWidth - 2 * gap - 16) / 5).clamp(
-              40.0,
-              104.0,
-            );
-            final radius = (size * 0.19).clamp(10.0, 20.0);
-            Widget pad(String label, String direction) => SquareButton(
-              label,
-              size: size,
-              radius: radius,
-              fontSize: size * 0.44,
-              onPressed: ready ? () {} : null,
-            );
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _turn('↺', size, ready, () => _hold('左转中…')),
-                const SizedBox(width: gap),
-                _dpad(size, pad),
-                const SizedBox(width: gap),
-                _turn('↻', size, ready, () => _hold('右转中…')),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            const Text('移动速度', style: TextStyle(fontSize: 14, color: C.muted)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: AppSelect<int>(
-                value: _speed,
-                items: const [
-                  (25, '慢 25%'),
-                  (50, '中 50%'),
-                  (75, '快 75%'),
-                  (100, '最快 100%'),
-                ],
-                onChanged: ready
-                    ? (value) => setState(() => _speed = value ?? _speed)
-                    : null,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          _message,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 14, color: C.muted),
-        ),
-      ],
-    );
-  }
-
-  Widget _turn(String label, double size, bool ready, VoidCallback hold) =>
-      Listener(
-        onPointerDown: (_) {
-          if (!ready) return;
-          hold();
-        },
-        onPointerUp: (_) => ready ? _release() : null,
-        onPointerCancel: (_) => ready ? _release() : null,
-        child: SquareButton(
-          label,
-          size: size,
-          radius: size / 2,
-          fontSize: size * 0.42,
-          color: C.warn,
-          onPressed: ready ? () {} : null,
-        ),
-      );
-
-  Widget _dpad(double size, Widget Function(String, String) pad) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(width: size, height: size),
-          const SizedBox(width: 8),
-          _holdButton(pad('↑', '前进')),
-          const SizedBox(width: 8),
-          SizedBox(width: size, height: size),
-        ],
-      ),
-      const SizedBox(height: 8),
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _holdButton(pad('←', '左移')),
-          const SizedBox(width: 8),
-          SizedBox(width: size, height: size),
-          const SizedBox(width: 8),
-          _holdButton(pad('→', '右移')),
-        ],
-      ),
-      const SizedBox(height: 8),
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(width: size, height: size),
-          const SizedBox(width: 8),
-          _holdButton(pad('↓', '后退')),
-          const SizedBox(width: 8),
-          SizedBox(width: size, height: size),
-        ],
-      ),
-    ],
-  );
-
-  Widget _holdButton(Widget child) => Listener(
-    onPointerDown: (_) {
-      if (_ready) _hold('移动中…');
-    },
-    onPointerUp: (_) => _release(),
-    onPointerCancel: (_) => _release(),
-    child: child,
-  );
-
-  void _hold(String message) => setState(() => _message = message);
-
-  void _release() => setState(() => _message = '已停止。');
-}
-
-// ---------------------------------------------------------------------------
 // 异常恢复
 // ---------------------------------------------------------------------------
 
@@ -998,7 +550,7 @@ class RecoverModal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final actions = _actions(app);
+    final actions = _actions(context, app);
     return _Dialog(
       width: 760,
       border: const Color(0xff6e322d),
@@ -1010,10 +562,6 @@ class RecoverModal extends StatelessWidget {
             app.modalTitle.isEmpty ? '设备异常' : app.modalTitle,
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
-          if (app.recoverKind == 'home') ...[
-            const SizedBox(height: 12),
-            const Center(child: _PoseView()),
-          ],
           const SizedBox(height: 8),
           Text(
             app.modalText,
@@ -1031,81 +579,46 @@ class RecoverModal extends StatelessWidget {
     );
   }
 
-  List<Widget> _actions(AppState app) => switch (app.recoverKind) {
-    'drop' => [
-      AppButton('确定', kind: BtnKind.ok, onPressed: () => app.resolveDrop(true)),
-      AppButton(
-        '取消',
-        kind: BtnKind.ghost,
-        onPressed: () => app.resolveDrop(false),
-      ),
-    ],
-    'home' => [
-      AppButton('确认移动', kind: BtnKind.ok, onPressed: app.confirmHome),
-      AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
-    ],
-    'device' => [AppButton('确定', onPressed: app.abortToHome)],
-    'service' => [
-      AppButton(
-        '去连接',
-        onPressed: () {
-          app.closeModal();
-          app.openModal(ModalKind.settings);
-        },
-      ),
-      AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
-    ],
-    _ => [AppButton('确定', onPressed: app.closeModal)],
-  };
-}
-
-class _PoseView extends StatelessWidget {
-  const _PoseView();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 220,
-    height: 150,
-    decoration: BoxDecoration(
-      color: C.input,
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: CustomPaint(painter: _PosePainter()),
-  );
-}
-
-class _PosePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final base = Paint()..color = const Color(0xff203044);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(size.width / 2 - 35, size.height - 15, 70, 12),
-        const Radius.circular(3),
-      ),
-      base,
-    );
-    canvas.drawRect(Rect.fromLTWH(size.width / 2 - 6, 95, 12, 40), base);
-    final upper = Paint()
-      ..color = C.brand
-      ..strokeWidth = 9
-      ..strokeCap = StrokeCap.round;
-    final lower = Paint()
-      ..color = const Color(0xff7c6adf)
-      ..strokeWidth = 8
-      ..strokeCap = StrokeCap.round;
-    final shoulder = Offset(size.width / 2, 95);
-    final elbow = Offset(size.width / 2 + 35, 55);
-    final wrist = Offset(size.width / 2 + 70, 60);
-    canvas.drawLine(shoulder, elbow, upper);
-    canvas.drawLine(elbow, wrist, lower);
-    canvas.drawCircle(shoulder, 6, Paint()..color = const Color(0xff2f6fb5));
-    canvas.drawCircle(elbow, 5, Paint()..color = const Color(0xff5f54c0));
-    canvas.drawCircle(wrist, 5, Paint()..color = C.warn);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  List<Widget> _actions(BuildContext context, AppState app) =>
+      switch (app.recoverKind) {
+        'drop' => [
+          AppButton(
+            '确定',
+            kind: BtnKind.ok,
+            onPressed: () => app.resolveDrop(true),
+          ),
+          AppButton(
+            '取消',
+            kind: BtnKind.ghost,
+            onPressed: () => app.resolveDrop(false),
+          ),
+        ],
+        'home' => [
+          AppButton('确认移动', kind: BtnKind.ok, onPressed: app.confirmHome),
+          AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
+        ],
+        'device' => [
+          AppButton(
+            '确定',
+            onPressed: () {
+              final router = GoRouter.of(context);
+              app.closeModal();
+              router.go(AppRoutes.forMode(app.mode));
+            },
+          ),
+        ],
+        'service' => [
+          AppButton(
+            '去设置',
+            onPressed: () {
+              app.closeModal();
+              app.openModal(ModalKind.settings);
+            },
+          ),
+          AppButton('取消', kind: BtnKind.ghost, onPressed: app.closeModal),
+        ],
+        _ => [AppButton('确定', onPressed: app.closeModal)],
+      };
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,33 +655,4 @@ class LoadingModal extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Label extends StatelessWidget {
-  const _Label(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 10, bottom: 6),
-    child: Text(text, style: const TextStyle(fontSize: 14, color: C.muted)),
-  );
-}
-
-class _ErrorText extends StatelessWidget {
-  const _ErrorText(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 26,
-    child: Align(
-      alignment: Alignment.centerLeft,
-      child: text.isEmpty
-          ? null
-          : Text(text, style: const TextStyle(fontSize: 14, color: C.bad)),
-    ),
-  );
 }

@@ -1,34 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/app_state.dart';
 import '../core/models.dart';
 import '../core/scope.dart';
 import '../core/theme.dart';
-import '../screens/collect.dart';
-import '../screens/done.dart';
-import '../screens/home.dart';
-import '../screens/library.dart';
+import '../router/app_routes.dart';
 import '../screens/modals.dart';
-import '../screens/review.dart';
-import '../screens/setup.dart';
-import '../screens/tasks.dart';
 
-/// 一个 Scaffold + 顶栏 + 当前页面 + 弹层，对应原型的 `.tablet`。
-class Shell extends StatelessWidget {
-  const Shell({super.key});
+/// 所有页面共用的外壳：顶栏 + 当前路由页面 + 弹层 + toast。
+class AppShell extends StatelessWidget {
+  const AppShell({super.key, required this.location, required this.child});
+
+  final String location;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final page = switch (app.screen) {
-      ScreenId.setup => const SetupScreen(),
-      ScreenId.home => const HomeScreen(),
-      ScreenId.tasks => const TasksScreen(),
-      ScreenId.done => const DoneScreen(),
-      ScreenId.library => const LibraryScreen(),
-      ScreenId.collect => const CollectScreen(),
-      ScreenId.review => const ReviewScreen(),
-    };
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -39,11 +28,8 @@ class Shell extends StatelessWidget {
           } else {
             app.closeModal();
           }
-          return;
         }
-        if (app.screen != ScreenId.home && app.screen != ScreenId.setup) {
-          app.go(ScreenId.home);
-        }
+        // 三个模式页不给系统返回键。
       },
       child: Scaffold(
         body: SafeArea(
@@ -51,12 +37,12 @@ class Shell extends StatelessWidget {
             children: [
               Column(
                 children: [
-                  const TopBar(),
-                  Expanded(child: page),
+                  TopBar(location: location),
+                  Expanded(child: child),
                 ],
               ),
-              const ModalHost(),
-              const _ToastView(),
+              ModalHost(location: location),
+              const ToastView(),
             ],
           ),
         ),
@@ -66,7 +52,9 @@ class Shell extends StatelessWidget {
 }
 
 class TopBar extends StatelessWidget {
-  const TopBar({super.key});
+  const TopBar({super.key, required this.location});
+
+  final String location;
 
   @override
   Widget build(BuildContext context) {
@@ -80,12 +68,7 @@ class TopBar extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth < 820;
-          final canMove =
-              app.robotOk &&
-              app.screen != ScreenId.collect &&
-              app.screen != ScreenId.library &&
-              app.screen != ScreenId.review;
+          final compact = constraints.maxWidth < 900;
           return Row(
             children: [
               Container(
@@ -102,7 +85,7 @@ class TopBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              if (!compact)
+              if (!compact) ...[
                 const Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,67 +99,34 @@ class TopBar extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '数据采集',
+                      '端侧数据采集',
                       style: TextStyle(fontSize: 13, color: C.muted),
                     ),
                   ],
                 ),
-              const SizedBox(width: 12),
+                const SizedBox(width: 12),
+              ],
               Expanded(
-                child: Center(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: _chips(app),
-                    ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ModeTabs(app: app),
+                      const SizedBox(width: 12),
+                      ..._chips(app),
+                    ],
                   ),
                 ),
               ),
-              if (!compact) ...[
-                AppButton(
-                  '手动控制',
-                  kind: BtnKind.ghost,
-                  height: 36,
-                  fontSize: 14,
-                  onPressed: canMove
-                      ? () => app.openModal(ModalKind.move)
-                      : null,
-                ),
-                const SizedBox(width: 8),
-                AppButton(
-                  '设置',
-                  kind: BtnKind.ghost,
-                  height: 36,
-                  fontSize: 14,
-                  onPressed: () => app.openModal(ModalKind.settings),
-                ),
-                const SizedBox(width: 8),
-              ] else
-                PopupMenuButton<String>(
-                  tooltip: '菜单',
-                  color: C.panel2,
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'move':
-                        app.openModal(ModalKind.move);
-                      case 'settings':
-                        app.openModal(ModalKind.settings);
-                      case 'login':
-                        app.openModal(ModalKind.login);
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'move',
-                      enabled: canMove,
-                      child: const Text('手动控制'),
-                    ),
-                    const PopupMenuItem(value: 'settings', child: Text('设置')),
-                    const PopupMenuItem(value: 'login', child: Text('切换账号')),
-                  ],
-                ),
-              _PersonButton(compact: compact),
+              const SizedBox(width: 8),
+              AppButton(
+                '设置',
+                kind: BtnKind.ghost,
+                height: 36,
+                fontSize: 14,
+                onPressed: () => app.openModal(ModalKind.settings),
+              ),
             ],
           );
         },
@@ -193,38 +143,16 @@ class TopBar extends StatelessWidget {
         ),
       ];
     }
+
     final chips = <Widget>[
-      if (app.screen == ScreenId.collect) ...[
-        StatusChip(
-          app.vrOk ? 'VR在线' : 'VR未连接',
-          tone: app.vrOk ? ChipTone.ok : ChipTone.bad,
-        ),
-        StatusChip(
-          app.gripperOk ? '夹爪就绪' : '夹爪未连接',
-          tone: app.gripperOk ? ChipTone.ok : ChipTone.bad,
-        ),
+      if (app.mode == PageMode.collect) ...[
+        _tone(app.vrOk, 'VR'),
+        _tone(app.gripperOk, '夹爪'),
       ],
-      StatusChip(
-        app.armOk ? '双臂就绪' : '双臂未启动',
-        tone: app.armOk ? ChipTone.ok : ChipTone.bad,
-      ),
-      if (app.screen == ScreenId.collect)
-        StatusChip(
-          app.camOk ? '相机正常' : '设备异常',
-          tone: app.camOk ? ChipTone.ok : ChipTone.bad,
-        ),
-      StatusChip(
-        app.baseOk ? '底盘就绪' : '底盘未启动',
-        tone: app.baseOk ? ChipTone.ok : ChipTone.bad,
-      ),
-      StatusChip(
-        app.storageText,
-        tone: !app.storageOk
-            ? ChipTone.bad
-            : app.storageWarn
-            ? ChipTone.warn
-            : ChipTone.ok,
-      ),
+      _tone(app.armOk, '双臂'),
+      if (app.mode == PageMode.collect) _tone(app.camOk, '相机'),
+      _tone(app.baseOk, '底盘'),
+      StatusChip(app.storageText),
     ];
     return [
       for (var i = 0; i < chips.length; i++) ...[
@@ -232,6 +160,72 @@ class TopBar extends StatelessWidget {
         chips[i],
       ],
     ];
+  }
+
+  Widget _tone(bool ok, String label) =>
+      StatusChip(label, tone: ok ? ChipTone.ok : ChipTone.bad);
+}
+
+class _ModeTabs extends StatelessWidget {
+  const _ModeTabs({required this.app});
+
+  final AppState app;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: C.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < PageMode.values.length; i++) ...[
+            if (i > 0) const VerticalDivider(width: 1, color: C.line),
+            _tab(context, PageMode.values[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _tab(BuildContext context, PageMode mode) {
+    final inactive = app.recording;
+    final active = app.robotOk && !inactive && app.mode == mode;
+    return InkWell(
+      onTap: () {
+        if (!app.robotOk) {
+          app.toast('请先连接机器人');
+          return;
+        }
+        if (app.recording) {
+          app.toast('请先结束采集');
+          return;
+        }
+        if (app.enterMode(mode)) {
+          context.go(AppRoutes.forMode(mode));
+        }
+      },
+      borderRadius: BorderRadius.circular(7),
+      child: Opacity(
+        opacity: inactive ? 0.45 : 1,
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          alignment: Alignment.center,
+          color: active ? C.brand : Colors.transparent,
+          child: Text(
+            mode.label,
+            style: TextStyle(
+              fontSize: 15,
+              color: active ? Colors.white : C.muted,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -249,53 +243,8 @@ class _ChipTap extends StatelessWidget {
   );
 }
 
-class _PersonButton extends StatelessWidget {
-  const _PersonButton({required this.compact});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final app = AppScope.of(context);
-    final name = app.currentUser ?? '未登录';
-    return InkWell(
-      onTap: () {
-        if (app.recording) {
-          app.toast('采集中不能切换人员');
-          return;
-        }
-        app.openModal(ModalKind.login);
-      },
-      borderRadius: BorderRadius.circular(99),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: C.panel2,
-              child: Text(
-                name.characters.last,
-                style: const TextStyle(fontSize: 15, color: Colors.white),
-              ),
-            ),
-            if (!compact) ...[
-              const SizedBox(width: 8),
-              Text(
-                name,
-                style: const TextStyle(fontSize: 15, color: C.softInk),
-              ),
-              const Icon(Icons.expand_more, size: 16, color: C.muted),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ToastView extends StatelessWidget {
-  const _ToastView();
+class ToastView extends StatelessWidget {
+  const ToastView({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -29,7 +29,7 @@ magic(8) | Header | Chunk... | Chunk... | Summary | Footer | magic(8)
 ```
 
 - **Chunk**：一批消息打包在一起，可以压缩（我们支持未压缩和 zlib）。
-- **ChunkIndex**：记录每个 chunk 在文件里的 offset/length、起止时间、每个 channel 的消息数。
+- **ChunkIndex**：记录每个 chunk 在文件里的 offset/length、起止时间、每个 channel 的 message index offset。
 - **Summary**：schema、channel、chunk index、statistics，放在文件尾部。
 - **Footer**：最后 37 字节，指向 Summary 的起始位置。
 
@@ -69,7 +69,7 @@ channel_id(2) | sequence(4) | log_time(8) | publish_time(8) | data
 打开一个包的过程：
 
 1. `HEAD` 拿文件长度；服务器不支持 HEAD 就发 `Range: bytes=0-0`，从 `Content-Range` 里拿总长度。
-2. 读最后 37 字节，校验 magic 和 Footer，拿到 Summary 的 offset。
+2. 读文件尾部 64 字节窗口，校验最后 8 字节 magic，再定位最后 37 字节里的 Footer，拿到 Summary 的 offset。
 3. 读 Summary，拿到 schema、channel、chunk index、statistics。
 4. 播放时按 chunk 发 `Range: bytes=start-end`，只下当前需要的块。
 
@@ -78,7 +78,7 @@ channel_id(2) | sequence(4) | log_time(8) | publish_time(8) | data
 - 必须返回 **206**，不能是 200。返回 200 说明服务器忽略了 Range，整个文件会被拉下来。
 - `Content-Range` 要准确，`start-end/total` 对得上；我们对返回长度也做了校验。
 - 要 `Accept-Encoding: identity`。中间层如果 gzip 了，`Content-Length` 和 Range 的语义都会乱，我们直接按字节数校验，错了就报。
-- 文件在播放期间不能变。读到一半总长度变了，直接报“回放文件在读取期间发生变化”。
+- 文件在播放期间不要被替换。`McapRemoteFile` 在 `open()` 时缓存文件长度，之后不重新校验；文件变了通常表现为 Range 长度不符或 chunk 解析失败，没有专门的“文件变化”错误。
 
 第一版不是这么做的：整包下载到临时文件，边下边建索引。几 GB 的包光打开就要等半天，还占磁盘，后来整个删了。现在首帧只依赖 footer + summary + 第一个 chunk。
 
@@ -116,7 +116,7 @@ height, width, encoding, is_bigendian, step, data
 header + format + data
 ```
 
-format 里含 jpeg/jpg/png 就交给 `instantiateImageCodec`，其他格式直接丢。
+当前不检查 `format` 字符串，直接把 `data` 交给 `instantiateImageCodec`；解不出来就丢帧。`format` 只保留在 `McapCompressedImage` 里，没有参与分派。
 
 ### JointState
 
@@ -132,13 +132,13 @@ header + name[] + position[] + velocity[] + effort[]
 header + count + (name, value)[]
 ```
 
-`pal_statistics_msgs` 的格式。名字带 `state_interface.` / `command_interface.` 前缀，我们按前缀分状态/指令，只留 `/position`，再去掉前缀和后缀，按关节名对齐。
+`pal_statistics_msgs` 的格式。名字带 `state_interface.` / `command_interface.` 前缀，我们按前缀分状态/指令；`JointTrack` 只在名字以 `/position` 结尾时去掉前缀和后缀。当前代码没有强制过滤 Statistics 里的非 `/position` 项，velocity/effort 如果出现在 Statistics 里也会进曲线（实际 PAL 包通常只有 position）。
 
 为什么要同时支持 JointState 和 Statistics：不同批次的录制不一样。现有样例 `train_data_1_0.mcap` 里是 JointState；更早的机器人包里有 Statistics。两条路都保留，按 schema 分派。
 
 ## 4. 一条回放的完整流程
 
-1. 用户在“查看数据”里选一条记录，拿到 `sourceUrl`。
+1. 用户在“查看数据”里选一条记录；`AppState._openPlayback()` 用 `defaultMcapUrl(savedIp)` 建 `PlaybackController`，当前还没有按记录取 `sourceUrl`。
 2. `PlaybackController.open()`：
    - `McapRemoteFile.open()`：HEAD/Range、footer、summary。
    - `McapSummary.load()`：schema、channel、chunk index、statistics。
@@ -164,7 +164,7 @@ MCAP 里的 topic 名字不固定，我们按关键字归一：
 
 认不出来的图像 channel 按 topic 排序后，依次补到还没占用的槽位。比如包里只有两路鱼眼，会先按 `fisheye_l/r` 分到左右，主视角和全景保持空白。
 
-关节按话题名分左臂/右臂/身体，Statistics 还会按 `state_interface.` / `command_interface.` 分状态和指令。头部关节不进 UI（我们只画三组），名字里没有 `/position` 的也丢掉。
+关节按话题名/关节名分左臂/右臂/身体；Statistics 还会按 `state_interface.` / `command_interface.` 分状态和指令。头部关节不进 UI（只画三组）。JointState 直接取 positions，不检查名字后缀；Statistics 当前也不强制过滤非 `/position` 项。
 
 ## 5. 播放时钟和 seek
 
@@ -214,14 +214,15 @@ Seek：
 - “回看”页复用同一个 `ReplayPanel`，底下是标记无效/返回列表。
 - `PlayBar`：后退 5 秒、逐帧后退、播放/暂停、逐帧前进、前进 5 秒、进度条、时间、倍速、循环。
 
-一个现状：所有 mock 采集条都指向同一个 `recordingUrl`，所以点哪条播的都是同一个包。接后端后要按记录存 `sourceUrl`，这是已知的临时行为。
+一个现状：所有采集条都共用 `defaultMcapUrl(savedIp)`（或 `--dart-define=MCAP_URL`），所以点哪条播的都是同一个包；`TakeRecord` 没有 `sourceUrl` 字段。接后端后要按记录存地址，这是已知的临时行为。
 
 ## 8. 服务器和配置
 
 本地联调：
 
 ```bash
-go run ./server -file /path/to/data.mcap -addr 127.0.0.1:8090
+# server/ 是独立 Go module，从仓库根目录用 -C 进入
+go -C server run . -file /path/to/data.mcap -addr 127.0.0.1:8090
 ```
 
 `server/main.go` 是一个单文件 Range 服务：`/data.mcap`、`/healthz`，用 `http.ServeContent` 处理 Range/HEAD，可选限速。生产上就是 Caddy 或者机器人自带的文件服务。
@@ -260,7 +261,7 @@ UI 上回放失败会显示“回放加载失败”+ 重试，具体原因在错
 | 没有 summary | 录制工具没写索引，当前不支持 |
 | 不支持的压缩 | chunk 是 zstd/lz4，目前只支持 none/zlib |
 | 没有图像或关节话题 | 包不对，或者 topic 名不匹配 |
-| 有画面没关节 | schema 不是 JointState/Statistics，或名字里没有 `/position` |
+| 有画面没关节 | schema 不是 JointState/Statistics，或话题/关节名里没有 left/right/body 等分组关键字 |
 | 拖动后卡一下 | 没缓存，重新拉 chunk |
 
 命令行先看包：
@@ -282,7 +283,7 @@ dart run tool/mcap_check.dart http://<host>:8090/<file>.mcap
 
 ## 12. 还没搞定的
 
-- 每条采集条独立 `sourceUrl`：现在全是同一个 mock URL。
+- 每条采集条独立回放地址：现在 `TakeRecord` 没有源字段，全部用 `MCAP_URL`/默认 URL。
 - chunk LRU 缓存：seek 回退会重复下载。
 - zstd/lz4：机器人如果换压缩方式，现在会直接报错。
 - 逐帧按真实帧时间戳走，不是固定 33ms。

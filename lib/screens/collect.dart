@@ -7,80 +7,62 @@ import '../core/scope.dart';
 import '../core/theme.dart';
 import '../ui/camera.dart';
 
-/// 数据采集：相机实时预览 + 任务进度 + 计时 + 录制。
+/// 数据采集：任务/人员选择 + 相机实时预览 + 计时 + 录制。
 class CollectScreen extends StatelessWidget {
   const CollectScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final task = app.currentTask;
+    final task = app.collectTaskItem;
     final wide = MediaQuery.sizeOf(context).width >= 1000;
 
-    final headerItems = <Widget>[
-      const Text(
-        '数据采集',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-      ),
-      AppSelect<String>(
-        value: task?.name ?? app.hereTasks.firstOrNull?.name ?? '',
-        width: 260,
-        items: app.hereTasks.isEmpty
-            ? const [('', '没有可采集的任务')]
-            : [for (final item in app.hereTasks) (item.name, item.name)],
-        onChanged: (value) {
-          if (value != null && value.isNotEmpty) app.switchTask(value);
-        },
-      ),
-      AppSelect<String>(
-        value: app.currentUser ?? '张三',
-        width: 140,
-        items: const [('张三', '张三'), ('李四', '李四')],
-        onChanged: (value) {
-          if (value != null) app.switchPerson(value);
-        },
-      ),
-      AppButton(
-        '采集说明',
-        kind: BtnKind.ghost,
-        height: 46,
-        onPressed: () => app.showBrief(task?.name ?? app.dataFilter),
-      ),
-      AppButton(
-        '已采 ${app.takesOf(task?.name ?? '').length} 条',
-        kind: BtnKind.ghost,
-        height: 46,
-        onPressed: app.viewDone,
-      ),
-    ];
-
-    final header = wide
-        ? Row(
-            children: [
-              ...headerItems,
-              const Spacer(),
-              AppButton(
-                '返回选择模式',
-                kind: BtnKind.ghost,
-                height: 46,
-                onPressed: app.leaveCollect,
-              ),
+    final header = LayoutBuilder(
+      builder: (context, constraints) {
+        final items = <Widget>[
+          const Text(
+            '数据采集',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+          ),
+          AppSelect<String>(
+            value: app.collectTask,
+            width: 260,
+            enabled: !app.recording,
+            items: [
+              ('', '全部任务'),
+              for (final item in app.localTasks) (item.name, item.name),
             ],
-          )
-        : Wrap(
+            onChanged: (value) => app.setCollectTask(value ?? ''),
+          ),
+          AppSelect<String>(
+            value: app.collectPerson,
+            width: 150,
+            enabled: !app.recording && task != null,
+            items: [
+              ('', '请选择人员'),
+              for (final person in task?.persons ?? const <String>[])
+                (person, person),
+            ],
+            onChanged: (value) => app.setCollectPerson(value ?? ''),
+          ),
+          AppButton(
+            '采集说明',
+            kind: BtnKind.ghost,
+            height: 46,
+            onPressed: task == null ? null : () => app.showBrief(task.name),
+          ),
+        ];
+        if (constraints.maxWidth < 900) {
+          return Wrap(
             spacing: 8,
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              ...headerItems,
-              AppButton(
-                '返回选择模式',
-                kind: BtnKind.ghost,
-                height: 46,
-                onPressed: app.leaveCollect,
-              ),
-            ],
+            children: items,
           );
+        }
+        return Row(children: items);
+      },
+    );
 
     final panels = <Widget>[
       _takeList(app),
@@ -113,7 +95,7 @@ class CollectScreen extends StatelessWidget {
                       const SizedBox(height: 10),
                       panels[2],
                       const SizedBox(height: 10),
-                      SizedBox(height: 260, child: panels[0]),
+                      SizedBox(height: 280, child: panels[0]),
                     ],
                   ),
           ),
@@ -123,7 +105,7 @@ class CollectScreen extends StatelessWidget {
   }
 
   Widget _takeList(AppState app) {
-    final rows = app.takesOf(app.currentTask?.name ?? '').take(7).toList();
+    final rows = app.collectRows;
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -141,21 +123,35 @@ class CollectScreen extends StatelessWidget {
                     separatorBuilder: (_, _) => const SizedBox(height: 6),
                     itemBuilder: (context, index) {
                       final take = rows[index];
+                      final latest = index == 0;
                       return Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: C.input,
+                          color: latest ? C.panel2 : C.input,
+                          border: Border.all(
+                            color: latest ? C.brand : Colors.transparent,
+                          ),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Hint(
-                              '${take.time} · ${take.duration} · ${take.size}',
-                              size: 14,
+                            if (app.collectTask.isEmpty)
+                              Text(
+                                take.task,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: C.legendInk,
+                                ),
+                              ),
+                            Text(
+                              '${take.time} · ${take.size}',
+                              style: const TextStyle(fontSize: 14),
                             ),
                             const SizedBox(height: 4),
                             Pill(
@@ -176,7 +172,6 @@ class CollectScreen extends StatelessWidget {
   Widget _cameras(AppState app) {
     final live = app.live;
     if (live == null) return _cameraPanel(null);
-    // 逐帧刷新只重建这一块，不让整页跟着 60Hz 重建。
     return ListenableBuilder(
       listenable: live,
       builder: (context, _) => _cameraPanel(live),
@@ -228,9 +223,9 @@ class CollectScreen extends StatelessWidget {
   }
 
   Widget _controls(AppState app, TaskItem? task) {
-    final done = task?.done ?? 0;
-    final total = task?.total ?? 0;
-    final left = (total - done).clamp(0, total);
+    final done = app.collectDone;
+    final total = app.collectTotal;
+    final left = app.collectLeft;
     final fsmColor = app.fsmState == 'HOME点'
         ? C.ok
         : app.fsmState == 'HOLD'
@@ -278,23 +273,24 @@ class CollectScreen extends StatelessWidget {
               app.lastTakeState,
               valueColor: app.lastTakeState == '已保存'
                   ? C.ok
-                  : app.lastTakeState == '已丢弃'
+                  : app.lastTakeState == '已作废'
                   ? C.bad
                   : C.muted,
             ),
             const SizedBox(height: 12),
             const SectionTitle('FSM状态'),
-            InkWell(
-              onTap: app.cycleFsm,
-              child: StatRow('当前', app.fsmState, valueColor: fsmColor),
-            ),
+            StatRow('当前', app.fsmState, valueColor: fsmColor),
             const SizedBox(height: 24),
             AppButton(
               app.recording ? '停止并保存' : '开始采集',
               kind: app.recording ? BtnKind.bad : BtnKind.ok,
               height: 58,
               fontSize: 20,
-              onPressed: app.toggleRec,
+              onPressed: app.recording
+                  ? app.stopCollect
+                  : app.canStartCollect
+                  ? app.startCollect
+                  : null,
             ),
             const SizedBox(height: 20),
             AppButton(

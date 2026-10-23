@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Android 的 `WifiManager.MulticastLock`：很多设备在息屏或后台会过滤组播，
-/// 采集期间持有它。原生实现见 `MainActivity.kt`，其他平台是空操作。
+/// 实时预览启动后持有它（当前连接成功即启动，离开采集页不停止）。原生实现见
+/// `MainActivity.kt`，其他平台是空操作。
 class AndroidMulticastLock {
   static const MethodChannel _channel = MethodChannel('tavi/multicast');
   static bool _held = false;

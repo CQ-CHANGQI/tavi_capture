@@ -1,17 +1,17 @@
-// 原型里的全部业务数据模型。业务数据仍是原型里的模拟数据：
-// 机器人台账、云端任务目录、已采采集条；实时画面和回放走真数据。
+// 原型里的全部业务数据模型。业务数据仍是模拟数据：
+// 机器人台账、任务目录、采集条；实时画面和回放走真实链路。
 
-enum ScreenId { setup, home, tasks, done, library, collect, review }
+/// 三个模式，和顶部三个按钮一一对应。
+enum PageMode {
+  collect('数据采集'),
+  review('查看数据'),
+  control('手动模式');
 
-enum Role {
-  engineer('工程师'),
-  operator('采集员');
-
-  const Role(this.label);
+  const PageMode(this.label);
   final String label;
 }
 
-enum ModalKind { login, brief, settings, move, recover, loading }
+enum ModalKind { brief, settings, recover, loading }
 
 enum JointMode {
   command('指令'),
@@ -48,47 +48,15 @@ enum JointGroup {
 class TaskItem {
   TaskItem({
     required this.name,
-    required this.done,
     required this.total,
-    required this.size,
-    required this.robot,
-    required this.ip,
-    required this.model,
-    this.state = '采集中',
+    this.persons = const ['张三', '李四'],
     this.brief = const [],
   });
 
   final String name;
-  int done;
   final int total;
-  String size;
-  final String robot;
-  final String ip;
-  final String model;
-  String state;
+  final List<String> persons;
   final List<String> brief;
-
-  double get progress => total <= 0 ? 0 : (done / total).clamp(0, 1);
-  int get left => (total - done).clamp(0, total);
-
-  /// 原型 `taskState()`：0 条 = 未开始，达标 = 已达标，否则采集中。
-  String get shownState {
-    if (done <= 0) return '未开始';
-    if (total > 0 && done >= total) return '已达标';
-    return '采集中';
-  }
-
-  TaskItem copyWith({int? done, String? state, String? size}) => TaskItem(
-    name: name,
-    done: done ?? this.done,
-    total: total,
-    size: size ?? this.size,
-    robot: robot,
-    ip: ip,
-    model: model,
-    state: state ?? this.state,
-    brief: brief,
-  );
 }
 
 class TakeRecord {
@@ -113,6 +81,14 @@ class TakeRecord {
   bool valid;
 
   String get duration => formatClock(durationSeconds);
+  String get personName => person;
+  String get robotName => robot;
+
+  String get fileName =>
+      '${task}_${time.replaceAll(' ', '_').replaceAll(':', '')}.mcap';
+  String get storagePath =>
+      '/data/episodes/$task/${time.replaceAll(' ', '_').replaceAll(':', '')}/';
+  String get takeName => fileName.substring(0, fileName.length - 5);
 
   TakeRecord copy() => TakeRecord(
     task: task,
@@ -123,12 +99,13 @@ class TakeRecord {
     robot: robot,
     valid: valid,
   );
+
+  String get statusText => valid ? '有效' : '无效';
 }
 
 class LogLine {
-  const LogLine(this.category, this.text, this.ageHours);
+  const LogLine(this.text, this.ageHours);
 
-  final String category;
   final String text;
   final double ageHours;
 }

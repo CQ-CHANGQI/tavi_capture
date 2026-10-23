@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/app_state.dart';
 import '../core/scope.dart';
 import '../core/theme.dart';
+import '../router/app_routes.dart';
 
-/// 首屏：连接机器人。自动连接失败就停在这里，改 IP 重连。
+/// 首屏：填机器人 IP，用户点连接。App 启动不自动连接。
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
 
@@ -18,13 +20,13 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _ip ??= AppScope.of(context).savedIp;
+    _ip ??= AppScope.of(context).configuredIp;
   }
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final ip = _ip ?? app.savedIp;
+    final ip = _ip ?? app.configuredIp;
     final wide = MediaQuery.sizeOf(context).width >= 900;
 
     final brand = Column(
@@ -36,6 +38,8 @@ class _SetupScreenState extends State<SetupScreen> {
               ? '正在连接'
               : app.robotOk
               ? '连接机器人'
+              : app.connectError.isEmpty
+              ? '连接机器人'
               : '无法连接机器人',
           style: const TextStyle(
             fontSize: 32,
@@ -46,10 +50,10 @@ class _SetupScreenState extends State<SetupScreen> {
         const SizedBox(height: 10),
         Text(
           app.connecting
-              ? '按已保存的 IP 连接机器人。连上之前顶栏不展示设备状态。'
-              : app.robotOk
-              ? '填写机器人 IP。保存后会记住，下次打开自动连接。'
-              : '已按上次保存的 IP 自动连接，但机器人没有响应。确认上电和网段后，再保存连接。',
+              ? '正在按填写的 IP 连接机器人。'
+              : app.connectError.isEmpty
+              ? '已从配置读取上次的 IP。确认机器人上电、和平板同一网段后，点击“保存并连接”。'
+              : '机器人没有响应。确认上电和网段后，再保存连接。',
           style: const TextStyle(fontSize: 16, color: C.muted, height: 1.6),
         ),
       ],
@@ -74,7 +78,14 @@ class _SetupScreenState extends State<SetupScreen> {
             app.connecting ? '正在连接…' : '保存并连接',
             block: true,
             height: 44,
-            onPressed: app.connecting ? null : () => app.connect(ip),
+            onPressed: app.connecting
+                ? null
+                : () async {
+                    await app.connect(ip);
+                    if (!context.mounted || !app.robotOk) return;
+                    app.enterMode(app.mode);
+                    context.go(AppRoutes.forMode(app.mode));
+                  },
           ),
           const SizedBox(height: 12),
           _status(app, ip),
@@ -134,6 +145,9 @@ class _SetupScreenState extends State<SetupScreen> {
         ),
       );
     }
+    if (app.connectError.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return _box(
       const Color(0xff2a1516),
       const Color(0xff6e322d),
@@ -150,9 +164,7 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            app.connectError.isEmpty
-                ? '机器人无响应。检查已上电、和平板同一网段、IP 是否写对。'
-                : app.connectError,
+            app.connectError,
             style: const TextStyle(
               fontSize: 15,
               height: 1.55,

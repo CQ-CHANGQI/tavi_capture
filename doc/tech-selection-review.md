@@ -2,6 +2,11 @@
 
 上一版把 Flutter、LCM、isolate、MCAP 混在一起讲，看着累。这版一个技术点一节，每节只讲这一件事：它解决什么问题、为什么用它、不用什么、代价是什么。
 
+> **实现状态（以代码为准）**：Flutter、dart:io、go_router、LCM、MCAP、自绘 UI、
+> Go 联调服务已经落地；`shared_preferences`、JSON REST + WebSocket、token 登录
+> 尚未接入。当前业务数据仍是 `AppState` 里的 mock，冷启动默认张三/工程师，
+> 机器人 IP 不持久化。
+
 先把地图放这：
 
 - UI 和跨平台：Flutter
@@ -16,12 +21,12 @@
 - 消息编码：CDR，自己写
 - 图像解码：Flutter engine
 - 状态管理：ChangeNotifier + InheritedNotifier
-- 路由：ScreenId + Shell
+- 路由：go_router + ShellRoute
 - UI 组件：自绘
 - 图表：CustomPainter
 - 网络客户端：dart:io
-- 业务接口：JSON REST + WebSocket
-- 本地存储：shared_preferences
+- 业务接口：JSON REST + WebSocket（计划，尚未接入）
+- 本地存储：shared_preferences（计划，尚未接入）
 - 联调服务：Go 标准库
 - 平台适配：Android/iOS/macOS/Windows 原生配置
 - 测试、日志、依赖策略
@@ -120,7 +125,7 @@ Range 是 HTTP 的字节范围请求，服务器返回 206 和 Content-Range。p
 
 第一版是整包下载到临时文件再建索引，几 GB 的包打开要等很久，还占磁盘，后来整个删了。现在 1.7GB 的包能直接打开播，首帧不用等下载。
 
-代价是服务器必须支持 Range/206、不能 gzip；文件在播放期间不能变；当前没有 chunk 缓存，拖回去会重新请求。
+代价是服务器必须支持 Range/206、不能 gzip；文件在播放期间不要被替换（当前代码只缓存打开时的长度，没有一致性校验）；当前没有 chunk 缓存，拖回去会重新请求。
 
 代码在 `McapRemoteFile`。
 
@@ -154,7 +159,7 @@ JPEG/PNG 用 `instantiateImageCodec`；raw 图（bgr8/rgb8 等）先转 RGBA，�
 
 ## 13. 状态管理：ChangeNotifier + InheritedNotifier
 
-一个 AppState（ChangeNotifier）管全局页面状态，AppScope（InheritedNotifier）往下传；实时和回放各自有 Controller。
+一个 AppState（ChangeNotifier）管全局业务状态，AppScope（InheritedNotifier）往下传；页面栈归 go_router，实时和回放各自有 Controller。
 
 不选 Riverpod：团队没人用过，这个 app 就一个状态机，引一套 provider/scope 规则不划算。不选 Bloc：事件/状态样板代码多，页面交互没那么复杂。
 
@@ -162,13 +167,13 @@ JPEG/PNG 用 `instantiateImageCodec`；raw 图（bgr8/rgb8 等）先转 RGBA，�
 
 代码在 `app_state.dart`、`scope.dart`、`live_preview.dart`、`playback.dart`。
 
-## 14. 路由：ScreenId + Shell
+## 14. 路由：go_router + ShellRoute
 
-路由就是一个枚举加一个 Shell 做 switch。就七八个固定页面，没有 URL、没有深链、没有浏览器历史；采集中还要拦一道“不能乱跳”，自己写反而直接。
+七个固定页面用 `GoRoute` 注册，`ShellRoute` 把顶栏、弹层和 toast 包在外面，子路由只替换页面内容。跳转用 `go` / `push` / `pushReplacement` / `pop`，录制中离开采集页由 collect 路由的 `onExit` 拦截。
 
-不选 go_router：路径、参数、重定向这套东西用不上，多一层配置。代价是没有深链、没有系统返回栈，返回逻辑自己写。
+不用裸 Navigator：`push/pop` 本身够用，但 redirect、`onExit` 和嵌套 shell 都要自己拼。代价是多一个 `go_router` 依赖，路径字符串要靠 `AppRoutes` 常量收口。
 
-代码在 `shell.dart`。
+代码在 `lib/router/`、`lib/ui/shell.dart`。
 
 ## 15. UI 组件：自绘
 
@@ -186,23 +191,23 @@ Material 基础上自己封按钮、输入、弹层、相机网格、播放条�
 
 ## 17. 网络客户端：dart:io，不引 dio
 
-HTTP 和 WebSocket 直接用 dart:io：HttpClient 控 Range、流式读、超时、连接复用；WebSocket 收事件。
+HTTP 和 WebSocket 直接用 dart:io：HttpClient 控 Range、流式读、超时、连接复用；WebSocket 收事件。当前代码只用了 HttpClient（MCAP）和 `Socket.connect`（连接探测），业务 WebSocket 还没接。
 
 dio 不是不好，是它的拦截器、取消、重试在这个场景用不上；Range 和原始流最后还是要落到 HttpClient，多一层封装反而难排查。代价是重试、超时、鉴权头要自己封一个薄 client。
 
 ## 18. 业务接口：JSON REST + WebSocket
 
-普通查询/命令走 HTTP JSON；状态、采集、任务变化走一条 WebSocket。调试直观，Flutter 自带客户端，LAN 延迟足够低。
+普通查询/命令走 HTTP JSON；状态、采集、任务变化走一条 WebSocket。调试直观，Flutter 自带客户端，LAN 延迟足够低。这是目标方案，当前业务数据仍由 `AppState` mock，没有 REST/WS client。
 
 不选 gRPC：要 proto/codegen/HTTP2，这点接口用不上。不选 MQTT：要 broker，消息语义也不适合请求/响应。代价是没有 schema 强约束，字段靠文档和手写模型。
 
 ## 19. 本地存储：shared_preferences
 
-只存上次连接的 IP；token 只放内存，重启重新登录。
+计划只存上次连接的 IP；token 只放内存，重启重新登录。
 
 就一个字符串，不值得上 sqlite/Hive；用文件的话 Android/iOS 目录和权限又要 path_provider。之前联调时把持久化去掉了，现在需求要缓存，又得加回来，绕了一圈。
 
-这是目前唯一计划新增的运行时依赖。
+**当前代码还没有这一步**：`pubspec` 里没有 shared_preferences，启动用的是 `ROBOT_IP` 默认值，`savedIp` 只存在内存。这是目前唯一计划新增的运行时依赖。
 
 ## 20. 联调服务：Go 标准库
 
@@ -212,7 +217,7 @@ dio 不是不好，是它的拦截器、取消、重试在这个场景用不上�
 
 ## 21. 平台适配：原生配置
 
-- Android：声明组播权限，采集期间持有 MulticastLock（MethodChannel `tavi/multicast`），不然息屏/后台会被过滤。
+- Android：声明组播权限；实时预览启动后持有 MulticastLock（MethodChannel `tavi/multicast`），不然息屏/后台会被过滤。当前连接成功就启动实时预览，离开采集页不会停，锁会一直持有到 App 退出。
 - iOS：需要 `com.apple.developer.networking.multicast` entitlement，现在没申请，所以 iOS 收不到组播；这不是代码问题。
 - macOS：App Sandbox 开 network.client/server，本地网络说明已配置。
 - Windows：防火墙放行 UDP 7667/7668 入站。
@@ -234,9 +239,9 @@ LCM 的缺片、乱序、过期只能靠单测，真组播只能靠 e2e。只靠
 
 ## 24. 依赖和版本
 
-现在 pubspec 里只有 Flutter 本体，计划加 shared_preferences。
+现在 pubspec 里是 Flutter 本体 + `go_router`，计划加 shared_preferences。
 
-明确不引：dio、http、provider、riverpod、bloc、go_router、fl_chart、第三方 LCM/MCAP 包。
+明确不引：dio、http、provider、riverpod、bloc、fl_chart、第三方 LCM/MCAP 包。
 
 版本：Flutter 3.47.7、Dart 3.13.5、Go 1.26。CI 里要锁，不然过两个月构建又对不上。
 
@@ -248,7 +253,7 @@ LCM 的缺片、乱序、过期只能靠单测，真组播只能靠 e2e。只靠
 - 4K raw 解码会卡，当前只有 1280 降采样。
 - AppState 膨胀，新模块必须独立 Controller。
 - 无 CI/CD，先锁版本，再串 analyze/test/e2e。
-- token 只在内存，重启要重新登录，安全优先。
+- token 只在内存，重启要重新登录，安全优先（目标方案；当前登录仍是本地 mock，没有 token）。
 
 ## 评审想听什么
 

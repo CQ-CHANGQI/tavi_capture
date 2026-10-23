@@ -6,10 +6,11 @@ version: 1.0.0+1
 environment:
   sdk: ^3.13.5
 
-# 只有 Flutter 本体：LCM、MCAP、CDR、图表全部是纯 Dart。
+# 依赖只有 Flutter + go_router；LCM、MCAP、CDR、图表全部是纯 Dart。
 dependencies:
   flutter:
     sdk: flutter
+  go_router: ^18.1.1
 
 dev_dependencies:
   flutter_test:
